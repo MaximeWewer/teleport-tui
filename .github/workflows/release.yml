@@ -103,8 +103,10 @@ jobs:
         include:
           # `platform` is the friendly <os>-<arch> label used in the asset name;
           # `target` is the Rust triple used to build.
+          # musl → a fully static binary with no glibc dependency, so it runs on
+          # any Linux distro regardless of the (newer) glibc on the CI runner.
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
             platform: linux-x86_64
           - os: macos-latest
             target: aarch64-apple-darwin
@@ -126,6 +128,11 @@ jobs:
 
       - name: Add target
         run: rustup target add ${{ matrix.target }}
+
+      # musl needs its linker; pure-Rust deps then link fully static against it.
+      - name: Install musl toolchain
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Cache cargo
         uses: actions/cache@v6

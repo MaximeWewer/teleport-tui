@@ -67,7 +67,7 @@ Grab the archive for your platform from the
 [Releases](https://github.com/MaximeWewer/teleport-tui/releases) page, then drop the
 binary somewhere on your `PATH` so you can call `teleport-tui` from any shell.
 
-**Linux** (`…-linux-x86_64.tar.gz`)
+**Linux** (`…-linux-x86_64.tar.gz`) — statically linked (musl)
 
 ```bash
 tar xzf teleport-tui-*-linux-x86_64.tar.gz
