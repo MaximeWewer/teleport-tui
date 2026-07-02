@@ -61,13 +61,61 @@ It's a front-end for a security product, so it behaves like one:
 **Runs on Linux, macOS and Windows** — config, state and binary paths are resolved
 per-OS, and CI builds and tests on all three.
 
+### From a release (prebuilt binary)
+
+Grab the archive for your platform from the
+[Releases](https://github.com/MaximeWewer/teleport-tui/releases) page, then drop the
+binary somewhere on your `PATH` so you can call `teleport-tui` from any shell.
+
+**Linux** (`…-linux-x86_64.tar.gz`)
+
+```bash
+tar xzf teleport-tui-*-linux-x86_64.tar.gz
+sudo install -m 755 teleport-tui /usr/local/bin/    # all users; on PATH by default
+# …or user-only, no sudo:
+#   mkdir -p ~/.local/bin && install -m 755 teleport-tui ~/.local/bin/
+#   (make sure ~/.local/bin is on your PATH)
+teleport-tui
+```
+
+**macOS — Apple Silicon** (`…-macos-arm64.tar.gz`)
+
+```bash
+tar xzf teleport-tui-*-macos-arm64.tar.gz
+xattr -d com.apple.quarantine teleport-tui 2>/dev/null || true   # clear Gatekeeper flag
+sudo install -m 755 teleport-tui /usr/local/bin/
+teleport-tui
+```
+
+The binary is unsigned, so Gatekeeper quarantines it on first download — the `xattr`
+above clears it (or allow it once via System Settings → Privacy & Security).
+
+**Windows** (`…-windows-x86_64.zip`)
+
+Unzip to get `teleport-tui.exe`, then put it in a directory on your `PATH`:
+
+```powershell
+$dir = "$env:LOCALAPPDATA\Programs\teleport-tui"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+Move-Item .\teleport-tui.exe $dir -Force
+# add it to the user PATH (once), then restart the shell
+[Environment]::SetEnvironmentVariable(
+  "Path", "$([Environment]::GetEnvironmentVariable('Path','User'));$dir", "User")
+teleport-tui
+```
+
+### From source
+
 ```bash
 cargo run --release
 # or build the binary:
 cargo build --release && ./target/release/teleport-tui
 ```
 
-Needs Rust 1.95+ (pinned via `rust-toolchain.toml`) and `tsh` on your `PATH`.
+Needs Rust 1.95+ (pinned via `rust-toolchain.toml`).
+
+In every case, `tsh` must be on your `PATH` (or set `tsh_path` in the config); `tctl` is
+optional and enables the admin tabs when present.
 
 ## Keybindings
 
