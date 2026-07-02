@@ -1,0 +1,21 @@
+version: 2
+
+# Keep CI actions and Rust dependencies current. Updates are grouped so each
+# ecosystem opens a single PR instead of one per dependency (less noise); the
+# Quality workflow gates every PR, so a bad bump is caught before merge.
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]

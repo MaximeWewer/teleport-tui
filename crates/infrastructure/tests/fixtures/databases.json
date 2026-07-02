@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "db",
+    "version": "v3",
+    "metadata": { "name": "pg-main", "labels": { "env": "prod" } },
+    "spec": { "protocol": "postgres", "uri": "pg.internal:5432" }
+  },
+  {
+    "kind": "db",
+    "version": "v3",
+    "metadata": { "name": "mysql-reports", "labels": null },
+    "spec": { "protocol": "mysql", "uri": "mysql.internal:3306" }
+  }
+]

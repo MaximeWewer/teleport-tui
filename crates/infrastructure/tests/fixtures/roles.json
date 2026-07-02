@@ -1,0 +1,24 @@
+[
+  {
+    "kind": "role",
+    "version": "v7",
+    "metadata": {
+      "name": "access",
+      "description": "Access cluster resources",
+      "labels": {
+        "teleport.internal/resource-type": "preset"
+      }
+    }
+  },
+  {
+    "kind": "role",
+    "version": "v7",
+    "metadata": {
+      "name": "access-plugin",
+      "description": "Default access plugin role",
+      "labels": {
+        "teleport.internal/resource-type": "preset"
+      }
+    }
+  }
+]

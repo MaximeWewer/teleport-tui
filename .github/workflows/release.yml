@@ -1,0 +1,163 @@
+name: Release
+
+# Builds the `teleport-tui` binary for every supported target, stamps a CalVer
+# version (YYYY.MM.X) into Cargo.toml, and attaches the archives to a GitHub
+# Release.
+#
+# Versioning:
+#   - push a tag `vYYYY.MM.X` (or `vYYYY.MM.X-rc1`) → that version is used;
+#   - run manually with `force_version` → that version is used;
+#   - run manually without input → next patch of the current month is computed
+#     from existing tags (vYYYY.MM.1, .2, …).
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*.*.*-*"
+  workflow_dispatch:
+    inputs:
+      force_version:
+        description: "Force a specific version (optional, format: YYYY.MM.X)"
+        required: false
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write # create the release + upload assets
+
+jobs:
+  # Resolve the CalVer version once and gate the release on the test suite.
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      tag: ${{ steps.get_version.outputs.tag }}
+      is_prerelease: ${{ steps.get_version.outputs.is_prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need full tag history for the auto-increment path
+
+      - name: Generate version (CalVer YYYY.MM.X)
+        id: get_version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FORCE_VERSION: ${{ github.event.inputs.force_version }}
+        run: |
+          if [ "${EVENT_NAME}" = "push" ]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+          elif [ -n "${FORCE_VERSION}" ]; then
+            VERSION="${FORCE_VERSION#v}"
+          else
+            git fetch --tags --force
+            YEAR_MONTH=$(date +'%Y.%-m')
+            LATEST_TAG=$(git tag -l "v${YEAR_MONTH}.*" | sort -V | tail -n 1)
+            if [ -z "${LATEST_TAG}" ]; then
+              VERSION="${YEAR_MONTH}.1"
+            else
+              PATCH="${LATEST_TAG##*.}"
+              VERSION="${YEAR_MONTH}.$((PATCH + 1))"
+            fi
+          fi
+
+          # Normalize the numeric core to strict semver (strip leading zeros,
+          # e.g. 2026.02.1 -> 2026.2.1) while preserving any -prerelease suffix.
+          CORE="${VERSION%%-*}"
+          SUFFIX=""
+          [ "${VERSION}" != "${CORE}" ] && SUFFIX="-${VERSION#*-}"
+          CORE=$(echo "${CORE}" | awk -F. '{printf "%d.%d.%d", $1, $2, $3}')
+          VERSION="${CORE}${SUFFIX}"
+          TAG="v${VERSION}"
+
+          {
+            echo "version=${VERSION}"
+            echo "tag=${TAG}"
+            if [ -n "${SUFFIX}" ]; then
+              echo "is_prerelease=true"
+            else
+              echo "is_prerelease=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
+          echo "::notice::Release version ${VERSION} (tag ${TAG})"
+
+  # Shared quality gate (fmt/clippy/test/build, 3 OS) — same checks as CI.
+  quality:
+    name: Quality
+    uses: ./.github/workflows/quality.yml
+
+  build:
+    name: ${{ matrix.target }}
+    needs: [prepare, quality]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v7
+
+      # Stamp the resolved version into the single source of truth
+      # (`[workspace.package].version`); every crate inherits it.
+      - name: Set version
+        shell: bash
+        run: |
+          sed -i.bak 's/^version = "0.0.0-dev"$/version = "${{ needs.prepare.outputs.version }}"/' Cargo.toml
+          rm -f Cargo.toml.bak
+          grep '^version = ' Cargo.toml
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      # No --locked: the version stamp above intentionally makes Cargo.lock
+      # stale; cargo refreshes it in-CI (it is not committed back).
+      - name: Build (release)
+        run: cargo build --release --bin teleport-tui --target ${{ matrix.target }}
+
+      # Archive the binary: .zip on Windows, .tar.gz elsewhere.
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          TARGET="${{ matrix.target }}"
+          NAME="teleport-tui-${VERSION}-${TARGET}"
+          BIN_DIR="target/${TARGET}/release"
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            ASSET="${NAME}.zip"
+            7z a "${ASSET}" "./${BIN_DIR}/teleport-tui.exe"
+          else
+            ASSET="${NAME}.tar.gz"
+            tar czf "${ASSET}" -C "${BIN_DIR}" teleport-tui
+          fi
+          echo "asset=${ASSET}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          prerelease: ${{ needs.prepare.outputs.is_prerelease == 'true' }}
+          files: ${{ steps.package.outputs.asset }}
+          fail_on_unmatched_files: true

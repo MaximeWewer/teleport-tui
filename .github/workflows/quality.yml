@@ -1,0 +1,106 @@
+name: Quality
+
+# The quality gate: format, lint and test on every OS (test compiles the whole
+# tree), plus supply-chain (cargo-deny), unused-deps (cargo-machete) and rustdoc
+# checks. The actual release binaries are built by release.yml.
+#
+# Runs on pushes to main and on pull requests, and is reusable (`workflow_call`)
+# so release.yml runs the exact same checks before publishing.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+# Cancel superseded runs on the same ref (e.g. rapid PR pushes) to save minutes.
+# Only on pull requests — runs on main and reusable release calls always finish.
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege: every job here only reads the repository.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Formatting is OS-independent — run it once (fast) instead of 3× in the matrix.
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Format
+        run: cargo fmt --all --check
+
+  # Lint + test on every OS — the matrix is what exercises the cfg(windows) /
+  # cfg(unix) code paths (proxy.rs, ssh.rs). `--locked` pins the committed
+  # Cargo.lock so CI resolves the exact dependency versions.
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      # rust-toolchain.toml pins the version + components (rustfmt, clippy).
+      - name: Show toolchain
+        run: rustc --version && cargo --version
+
+      # Rust-aware cache: keyed on Cargo.lock + rustc + os, prunes stale build
+      # artifacts, and only writes a fresh cache from the default branch.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+  # Supply-chain gate: vulnerabilities (RustSec), licenses, sources, wildcards.
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  # Enforce the minimal-dependencies constraint: no unused dependencies.
+  machete:
+    name: cargo-machete
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - name: Check for unused dependencies
+        run: cargo machete
+
+  # Build the docs with broken intra-doc links treated as errors.
+  docs:
+    name: rustdoc
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: docs
+      - name: Build docs
+        run: cargo doc --no-deps --workspace --locked

@@ -1,0 +1,34 @@
+[
+  {
+    "kind": "node",
+    "version": "v2",
+    "metadata": {
+      "name": "d382f031-3ac5-49eb-9b6d-2595d8d96bc5",
+      "labels": {
+        "group": "vm",
+        "scope": "internal"
+      },
+      "expires": "2026-06-28T20:49:01.696356966Z"
+    },
+    "spec": {
+      "hostname": "linux-u22",
+      "addr": ""
+    }
+  },
+  {
+    "kind": "node",
+    "version": "v2",
+    "metadata": {
+      "name": "f2ca60c8-e469-4578-9061-0bcc4484c4cb",
+      "labels": {
+        "group": "vm",
+        "scope": "internal"
+      },
+      "expires": "2026-06-28T20:48:05.485112411Z"
+    },
+    "spec": {
+      "hostname": "linux-d13",
+      "addr": ""
+    }
+  }
+]

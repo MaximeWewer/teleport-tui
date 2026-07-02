@@ -1,0 +1,11 @@
+{
+  "active": {
+    "username": "maxime.wewer",
+    "cluster": "root.example.com",
+    "roles": ["commons-options", "opensearch", "teleport"],
+    "logins": ["root", "admin"],
+    "kubernetes_enabled": true,
+    "valid_until": "2026-06-29T10:16:22+02:00"
+  },
+  "profiles": []
+}

@@ -1,0 +1,37 @@
+[
+  {
+    "cluster_name": "root.example.com",
+    "status": "online",
+    "cluster_type": "root",
+    "labels": null,
+    "selected": true
+  },
+  {
+    "cluster_name": "leaf1.exmaple.com",
+    "status": "online",
+    "cluster_type": "leaf",
+    "labels": null,
+    "selected": false
+  },
+  {
+    "cluster_name": "leaf2.exmaple.com",
+    "status": "online",
+    "cluster_type": "leaf",
+    "labels": null,
+    "selected": false
+  },
+  {
+    "cluster_name": "leaf3.exmaple.com",
+    "status": "online",
+    "cluster_type": "leaf",
+    "labels": null,
+    "selected": false
+  },
+  {
+    "cluster_name": "leaf4.exmaple.com",
+    "status": "online",
+    "cluster_type": "leaf",
+    "labels": null,
+    "selected": false
+  }
+]

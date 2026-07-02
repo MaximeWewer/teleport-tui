@@ -1,0 +1,30 @@
+[
+  {
+    "kind": "user",
+    "version": "v2",
+    "metadata": {
+      "name": "maxime.wewer",
+      "labels": {
+        "app.kubernetes.io/instance": "app-root-one",
+        "teleport.dev/origin": "kubernetes"
+      }
+    },
+    "spec": {
+      "roles": ["commons-options", "teleport", "opensearch", "grafana"]
+    }
+  },
+  {
+    "kind": "user",
+    "version": "v2",
+    "metadata": {
+      "name": "toto.titi",
+      "labels": {
+        "app.kubernetes.io/instance": "app-root-one",
+        "teleport.dev/origin": "kubernetes"
+      }
+    },
+    "spec": {
+      "roles": ["commons-options", "internal-lab"]
+    }
+  }
+]

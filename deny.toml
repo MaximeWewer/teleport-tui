@@ -1,0 +1,34 @@
+# cargo-deny — supply-chain & license gate (run in CI via cargo-deny-action).
+# Enforces the project's constraints: crates.io-only sources, vetted licenses,
+# no known vulnerabilities, no wildcard version requirements.
+
+[advisories]
+# RustSec advisory DB. Vulnerabilities/unmaintained are denied by default;
+# also reject yanked releases.
+yanked = "deny"
+
+[licenses]
+# Accepted license terms. An "A OR B" expression passes if either side is here;
+# an "A AND B" expression requires both. The current tree needs Unicode-* on the
+# AND side of a few crates (e.g. unicode-ident), hence their inclusion.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[bans]
+# Two versions of the same crate = bloat / larger attack surface. Upstream
+# (ratatui) currently pulls two `hashbrown` versions, so warn rather than fail.
+multiple-versions = "warn"
+# Forbid "*" version requirements on external crates…
+wildcards = "deny"
+# …but allow the internal workspace crates, which are path deps without a version.
+allow-wildcard-paths = true
+
+[sources]
+# Dependencies must come from crates.io — no unknown registries or git sources.
+unknown-registry = "deny"
+unknown-git = "deny"

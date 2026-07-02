@@ -1,0 +1,32 @@
+[
+  {
+    "kind": "app",
+    "version": "v3",
+    "metadata": {
+      "name": "argocd",
+      "labels": {
+        "purpose": "monitoring",
+        "teleport.dev/origin": "config-file"
+      }
+    },
+    "spec": {
+      "uri": "https://argo.public-domain.com",
+      "public_addr": "argocd.root.example.com"
+    }
+  },
+  {
+    "kind": "app",
+    "version": "v3",
+    "metadata": {
+      "name": "karma",
+      "labels": {
+        "purpose": "monitoring",
+        "teleport.dev/origin": "config-file"
+      }
+    },
+    "spec": {
+      "uri": "https://karma.public-domain.com",
+      "public_addr": "karma.root.example.com"
+    }
+  }
+]

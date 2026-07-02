@@ -1,0 +1,15 @@
+[package]
+name = "application"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Use-case layer: orchestrates the domain. Depends ONLY on domain (its traits).
+[dependencies]
+domain = { workspace = true }
+
+[lints]
+workspace = true

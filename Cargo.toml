@@ -1,0 +1,52 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/domain",
+    "crates/application",
+    "crates/infrastructure",
+    "crates/tui",
+]
+
+[workspace.package]
+version = "0.0.0-dev"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+repository = "https://github.com/MaximeWewer/teleport-tui"
+publish = false
+
+# Shared dependency versions — declared once, referenced via `{ workspace = true }`.
+[workspace.dependencies]
+# UI — the requested lib; re-exports crossterm so no separate crossterm dep needed.
+ratatui = "0.30.2"
+# JSON — zero-dep, no proc-macro (preferred over serde/serde_json).
+nanoserde = "0.2.1"
+# Secret scrubbing.
+zeroize = "1.9.0"
+# Internal crates.
+domain = { path = "crates/domain" }
+application = { path = "crates/application" }
+infrastructure = { path = "crates/infrastructure" }
+
+# Project-wide lint policy (security/quality constraint).
+# Applied to every crate via `[lints] workspace = true`.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+indexing_slicing = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+[profile.release]
+strip = true
+lto = "thin"

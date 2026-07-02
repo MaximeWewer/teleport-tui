@@ -1,0 +1,25 @@
+[
+  {
+    "kind": "access_request",
+    "version": "v3",
+    "metadata": { "name": "11111111-2222-3333-4444-555555555555" },
+    "spec": {
+      "user": "maxime.wewer",
+      "roles": ["opensearch", "grafana"],
+      "state": 1,
+      "request_reason": "incident triage",
+      "created": "2026-06-28T10:00:00Z"
+    }
+  },
+  {
+    "kind": "access_request",
+    "version": "v3",
+    "metadata": { "name": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
+    "spec": {
+      "user": "toto.titi",
+      "roles": ["teleport"],
+      "state": 2,
+      "created": "2026-06-27T09:00:00Z"
+    }
+  }
+]

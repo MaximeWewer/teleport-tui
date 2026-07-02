@@ -1,0 +1,19 @@
+[package]
+name = "infrastructure"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Adapter layer: implements the domain ports. Where tsh/tctl exec, JSON
+# parsing, platform paths, and logging live. Depends only on `domain` (it
+# fulfils domain traits; it must not depend on the application layer).
+[dependencies]
+domain = { workspace = true }
+nanoserde = { workspace = true } # JSON parsing of tsh output
+zeroize = { workspace = true }   # scrub the join-token stdout buffer after parsing
+
+[lints]
+workspace = true
