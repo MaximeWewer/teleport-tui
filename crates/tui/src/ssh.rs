@@ -19,6 +19,8 @@ use ratatui::crossterm::style::{
 };
 use ratatui::crossterm::terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode, size};
 
+use infrastructure::redact::redact_text;
+
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
 /// Run `<program> <args>` with the terminal handed over, restoring the TUI
@@ -154,6 +156,7 @@ pub(crate) fn play_recording(
     execute!(out, Clear(ClearType::All), MoveTo(0, 0), Show)?;
     let width = size().map_or(80, |(w, _)| w as usize).max(20);
     let rule = "─".repeat(width);
+    let label = redact_text(label);
     // Raw mode is on, so emit explicit CRLF.
     execute!(
         out,
