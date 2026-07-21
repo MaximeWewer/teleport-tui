@@ -17,7 +17,10 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::style::{
     Attribute, Color, Print, ResetColor, SetAttribute, SetForegroundColor,
 };
-use ratatui::crossterm::terminal::{Clear, ClearType, disable_raw_mode, enable_raw_mode, size};
+use ratatui::crossterm::terminal::{
+    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode, size,
+};
 
 use infrastructure::redact::redact_text;
 
@@ -27,20 +30,26 @@ type Tui = Terminal<CrosstermBackend<Stdout>>;
 /// after. `envs` are extra environment variables for the child (e.g.
 /// `KUBECONFIG` for a kube shell).
 ///
-/// The child is handed a **cleared** screen with no banner of ours, so nothing
-/// lingers once the session starts: the user sees only `tsh`'s own output (its
+/// The child is handed the screen with no banner of ours, so nothing lingers
+/// once the session starts: the user sees only `tsh`'s own output (its
 /// connection progress, an MFA prompt, then the remote shell). We tried a
 /// transient banner, but with stdio inherited (no PTY, by design) there is no
 /// "connected" signal to erase it on — and letting `tsh`'s shorter first line
-/// overwrite ours left a visible tail on the prompt row. A clean screen is the
-/// only way to guarantee nothing is left behind. `label` is unused for on-screen
-/// output here; the connection delay is covered by `tsh`'s own progress/prompts.
+/// overwrite ours left a visible tail on the prompt row. `label` is unused for
+/// on-screen output here; the connection delay is covered by `tsh`'s own
+/// progress/prompts.
 ///
-/// The child runs **inside the alternate screen** (we never leave it): its
-/// output — connection banners, the shell session, `logout` — stays in the
-/// alternate buffer and is discarded when the TUI exits, so quitting leaves the
-/// terminal's main scrollback exactly as it was before launch (no session
-/// history left behind).
+/// We **leave the alternate screen** for the hand-off so the child writes into
+/// the terminal's *main* buffer. The alternate buffer has no scrollback, so a
+/// session whose output overflows the window could not be scrolled back at all
+/// (neither the wheel nor Shift-PgUp). Running in the main buffer restores the
+/// terminal's native scrollback for the whole session. Trade-off: the session's
+/// output stays in the terminal's history after the TUI exits. We re-enter the
+/// alternate screen when the child returns, so the TUI itself still leaves no
+/// trace of its own rendering.
+///
+/// Nothing is cleared on the way out: wiping the main buffer would destroy the
+/// scrollback we just went there for.
 ///
 /// SECURITY: `args` is an argv vector (no shell); every element is built from
 /// validated value objects upstream. `label` is non-secret.
@@ -64,22 +73,15 @@ pub(crate) fn run_interactive(
     envs: &[(&str, &str)],
     pause_on_exit: bool,
 ) -> io::Result<ExitStatus> {
-    // Drop raw mode for the child's cooked-mode prompt, but stay in the
-    // alternate screen. Clear it and show the cursor (ratatui hides it while
-    // rendering) so the child's shell/prompt cursor is visible when typing.
+    // Drop raw mode for the child's cooked-mode prompt and return to the main
+    // screen buffer, which is the one with scrollback (see the fn doc). Show the
+    // cursor (ratatui hides it while rendering) so the child's shell/prompt
+    // cursor is visible when typing. Release mouse capture too, so the child
+    // session gets the terminal's native mouse (wheel scrolls the scrollback,
+    // click-drag selects) instead of our tracking sequences.
     disable_raw_mode()?;
     let mut out = io::stdout();
-    // Clear + home + show cursor: hand tsh a pristine screen so no notice of ours
-    // survives into the live session (see the fn doc for why there's no banner).
-    // Release mouse capture too, so the child session gets the terminal's native
-    // mouse (scroll/select) instead of our tracking sequences.
-    execute!(
-        out,
-        DisableMouseCapture,
-        Clear(ClearType::All),
-        MoveTo(0, 0),
-        Show
-    )?;
+    execute!(out, DisableMouseCapture, LeaveAlternateScreen, Show)?;
     out.flush()?;
 
     // Hand over stdin/stdout/stderr to the child (inherited by default).
@@ -111,11 +113,12 @@ pub(crate) fn run_interactive(
         wait_any_key()?;
     }
 
-    // Resume the TUI regardless of the child's exit status. We never left the
-    // alternate screen, so a clear + redraw is all that's needed. Re-arm mouse
-    // capture (released for the child above) so the wheel scrolls the lists again.
+    // Resume the TUI regardless of the child's exit status: back into the
+    // alternate screen (the session's output stays behind in the main buffer's
+    // scrollback), then re-arm mouse capture — released for the child above — so
+    // the wheel scrolls the lists again.
     enable_raw_mode()?;
-    execute!(io::stdout(), EnableMouseCapture)?;
+    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
     terminal.clear()?;
 
     spawn
