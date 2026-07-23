@@ -335,8 +335,7 @@ impl AppProxy {
 
 impl Drop for AppProxy {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        crate::proxy::stop_child(&mut self.child);
     }
 }
 
@@ -371,8 +370,7 @@ impl Forward {
 
 impl Drop for Forward {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        crate::proxy::stop_child(&mut self.child);
     }
 }
 

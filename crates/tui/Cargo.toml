@@ -20,5 +20,12 @@ infrastructure = { workspace = true }
 ratatui = { workspace = true }
 zeroize = { workspace = true } # scrub the displayed join token from memory
 
+# Unix-only: signal a background proxy's whole process group so `tsh`'s helper
+# children die with it, not just the direct child. rustix is already in the tree
+# (crossterm pulls it); enabling its `process` feature adds no new crate, and its
+# API is safe — `unsafe_code = "forbid"` stays intact.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+
 [lints]
 workspace = true

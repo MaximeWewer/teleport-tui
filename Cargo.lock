@@ -1307,6 +1307,7 @@ dependencies = [
  "domain",
  "infrastructure",
  "ratatui",
+ "rustix",
  "zeroize",
 ]
 

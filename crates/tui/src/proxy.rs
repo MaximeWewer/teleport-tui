@@ -74,8 +74,7 @@ fn start_listening_proxy(
                 ))
             }
             Attempt::Failed(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop_child(&mut child);
                 Err(e)
             }
         };
@@ -96,8 +95,7 @@ fn start_listening_proxy(
             }
             // Real failure: stop retrying and surface it.
             Attempt::Failed(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop_child(&mut child);
                 return Err(e);
             }
         }
@@ -126,12 +124,14 @@ pub(crate) fn open_app(
     port: Option<u16>,
 ) -> io::Result<(Child, String)> {
     let (child, port) = start_listening_proxy(port, |p| {
-        Command::new(tsh)
-            .args(["proxy", "app", name, "-c", cluster, "-p", &p.to_string()])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+        own_group(
+            Command::new(tsh)
+                .args(["proxy", "app", name, "-c", cluster, "-p", &p.to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .spawn()
     })?;
     let url = format!("http://127.0.0.1:{port}");
     open_browser(&url);
@@ -156,21 +156,23 @@ pub(crate) fn open_db(
     port: Option<u16>,
 ) -> io::Result<(Child, String)> {
     let (child, port) = start_listening_proxy(port, |p| {
-        Command::new(tsh)
-            .args([
-                "proxy",
-                "db",
-                name,
-                "-c",
-                cluster,
-                "--tunnel",
-                "-p",
-                &p.to_string(),
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+        own_group(
+            Command::new(tsh)
+                .args([
+                    "proxy",
+                    "db",
+                    name,
+                    "-c",
+                    cluster,
+                    "--tunnel",
+                    "-p",
+                    &p.to_string(),
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+        .spawn()
     })?;
     Ok((child, format!("127.0.0.1:{port}")))
 }
@@ -234,14 +236,14 @@ fn kube_proxy_attempt(
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    own_group(&mut cmd);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return Attempt::Failed(e),
     };
 
     let Some(stdout) = child.stdout.take() else {
-        let _ = child.kill();
-        let _ = child.wait();
+        stop_child(&mut child);
         return Attempt::Failed(io::Error::other("proxy stdout unavailable"));
     };
 
@@ -266,8 +268,7 @@ fn kube_proxy_attempt(
     // recv fails fast); a still-alive child is stuck on something a new port
     // won't fix.
     let exited = matches!(child.try_wait(), Ok(Some(_)));
-    let _ = child.kill();
-    let _ = child.wait();
+    stop_child(&mut child);
     if exited {
         Attempt::PortLost
     } else {
@@ -305,12 +306,14 @@ pub(crate) fn start_ssh_forward(
     } else {
         format!("{user}@{host}")
     };
-    let mut child = Command::new(tsh)
-        .args(["ssh", "-c", cluster, "-L", spec, "-N", &target])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+    let mut child = own_group(
+        Command::new(tsh)
+            .args(["ssh", "-c", cluster, "-L", spec, "-N", &target])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+    )
+    .spawn()?;
 
     let local = local_forward_port(spec);
     // ~4s: bail out the moment the child dies; otherwise confirm the local port
@@ -390,6 +393,41 @@ fn free_port() -> io::Result<u16> {
     Ok(listener.local_addr()?.port())
 }
 
+/// Put a background proxy child in its **own process group** (leader = the child)
+/// so its whole tree can be signalled together by [`stop_child`]. `tsh proxy`
+/// may fork helper processes; without this, killing only the direct child would
+/// orphan those grandchildren and leak the port/tunnel. No-op off Unix (job
+/// control differs; there is no argv/no-shell concern here either way).
+fn own_group(cmd: &mut Command) -> &mut Command {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd
+}
+
+/// Stop a background proxy child **and its whole process group**, then reap it.
+/// Because the child was spawned as its own group leader ([`own_group`]), a
+/// signal to the group (`kill(-pgid)`) also reaches any helper `tsh` forked, so
+/// nothing is orphaned. The direct `kill`/`wait` still run as a fallback (and to
+/// reap the leader). Off Unix, only the direct child is killed.
+pub(crate) fn stop_child(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        // The leader's pgid equals its pid; signal the group before reaping, while
+        // the pid is still valid. Errors (already gone) are ignored.
+        if let Some(pgid) = i32::try_from(child.id())
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        {
+            let _ = rustix::process::kill_process_group(pgid, rustix::process::Signal::KILL);
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 /// Open the default browser at `url` (best-effort, per-OS, no shell metachars —
 /// the URL is a controlled localhost address).
 fn open_browser(url: &str) {
@@ -449,6 +487,54 @@ mod tests {
         });
         assert!(result.is_err(), "should give up, not succeed");
         assert_eq!(attempts.load(Ordering::Relaxed), PORT_RETRIES);
+    }
+
+    // Proof that stop_child reaches grandchildren: the direct child forks a
+    // `sleep` (a grandchild) and prints its pid. Killing only the direct child
+    // would orphan it; a process-group kill takes it down too. Linux-only (uses
+    // /proc for a liveness probe on a process that isn't ours to waitpid).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn stop_child_kills_the_whole_process_group() {
+        use super::{own_group, stop_child};
+        use std::io::{BufRead, BufReader};
+        use std::path::Path;
+        use std::process::{Command, Stdio};
+        use std::thread::sleep;
+        use std::time::Duration;
+
+        let mut child = own_group(
+            Command::new("sh")
+                .args(["-c", "sleep 30 & echo $!; sleep 30"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null()),
+        )
+        .spawn()
+        .expect("spawn sh");
+
+        let stdout = child.stdout.take().expect("stdout");
+        let mut line = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut line)
+            .expect("read grandchild pid");
+        let gpid: u32 = line.trim().parse().expect("grandchild pid");
+        let alive = format!("/proc/{gpid}");
+        assert!(Path::new(&alive).exists(), "grandchild should start alive");
+
+        stop_child(&mut child);
+
+        // Signalled via the group, the grandchild exits and init reaps it, so its
+        // /proc entry disappears. Poll briefly to absorb the reap race.
+        let gone = (0..100).any(|_| {
+            if Path::new(&alive).exists() {
+                sleep(Duration::from_millis(20));
+                false
+            } else {
+                true
+            }
+        });
+        assert!(gone, "grandchild {gpid} should die with the group");
     }
 
     #[test]

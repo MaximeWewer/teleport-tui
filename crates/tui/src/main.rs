@@ -370,8 +370,9 @@ fn handle_proxy_event(terminal: &mut Tui, app: &mut App, ev: app::ProxyEvent) {
                     &[("KUBECONFIG", kubeconfig.as_str())],
                     false,
                 );
-                let _ = child.kill();
-                let _ = child.wait();
+                // Stop the background kube proxy (and its process group) now the
+                // shell has exited.
+                proxy::stop_child(&mut child);
                 match r {
                     Ok(status) if !status.success() => app.note_command_exit(status.code()),
                     _ => app.note_session_ended(),
