@@ -187,46 +187,49 @@ pub(super) fn render_invite(frame: &mut Frame, app: &App) {
 pub(super) fn render_mfa(frame: &mut Frame, app: &App) {
     let area = centered(frame.area(), 80, 50);
     frame.render_widget(Clear, area);
-    let mut lines = vec![
-        Line::from(Span::styled(
-            "Your MFA devices",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
+    let block = Block::bordered().title(" MFA devices (tsh mfa ls) ");
     if app.mfa_devices.is_empty() {
-        lines.push(Line::from("No MFA devices registered."));
-    } else {
-        for (i, d) in app.mfa_devices.iter().enumerate() {
-            let selected = i == app.mfa_sel;
-            let marker = if selected { "▶ " } else { "  " };
-            let name_style = if selected {
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            lines.push(Line::from(vec![
-                Span::raw(marker),
-                Span::styled(format!("{}  ", d.name), name_style),
-                Span::styled(format!("[{}]", d.kind), Style::default().fg(Color::Cyan)),
-            ]));
-            lines.push(Line::from(Span::styled(
-                format!("    added {}   ·   last used {}", d.added, d.last_used),
-                Style::default().fg(Color::DarkGray),
-            )));
-        }
+        frame.render_widget(
+            Paragraph::new("No MFA devices registered.").block(block),
+            area,
+        );
+        return;
     }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "↑/↓ select · a add · d remove · Esc/q close",
-        Style::default().fg(Color::DarkGray),
-    )));
-    frame.render_widget(
-        Paragraph::new(lines).block(Block::bordered().title(" MFA devices (tsh mfa ls) ")),
-        area,
-    );
+    // A stateful List (seeded from `mfa_sel`) so ratatui scrolls to keep the
+    // selected device visible when the list is longer than the popup — a plain
+    // Paragraph would let the selection move off-screen out of reach.
+    let items: Vec<ListItem> = app
+        .mfa_devices
+        .iter()
+        .map(|d| {
+            ListItem::new(vec![
+                Line::from(vec![
+                    Span::styled(
+                        format!("{}  ", d.name),
+                        Style::default()
+                            .fg(Color::Gray)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(format!("[{}]", d.kind), Style::default().fg(Color::Cyan)),
+                ]),
+                Line::from(Span::styled(
+                    format!("    added {}   ·   last used {}", d.added, d.last_used),
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ])
+        })
+        .collect();
+    let mut state = ListState::default();
+    state.select(Some(app.mfa_sel));
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 pub(super) fn render_sessions(frame: &mut Frame, app: &App) {
