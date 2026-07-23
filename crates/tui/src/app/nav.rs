@@ -70,14 +70,41 @@ impl App {
         self.nodes.get(self.selected_index()?)
     }
 
-    /// Whether a tab is reachable: hidden when the user lacks admin rights (admin
-    /// group) or when the installed `tsh` doesn't support its command. SSH (`ls`)
-    /// is always available; Users/Roles go through `tctl` (handled separately).
+    /// Whether a tab is reachable: hidden when the admin group is unreachable
+    /// (see [`Self::admin_group_reachable`]) or when the installed `tsh` doesn't
+    /// support its command. SSH (`ls`) is always available.
     pub(crate) fn tab_visible(&self, tab: Tab) -> bool {
-        if tab.admin_gated() && !self.admin_allowed {
+        if tab.admin_gated() && !self.admin_group_reachable() {
             return false;
         }
         self.tab_supported(tab)
+    }
+
+    /// Whether the admin / Recordings tab group should be shown. The `tctl`
+    /// rights probe (`can_admin`) runs against the *currently selected profile
+    /// cluster*, and `tctl` has no cluster flag — so on a leaf it always errors,
+    /// making a `false` verdict there a false negative. We therefore hide the
+    /// group only when we probed **on the root cluster** and were denied; a leaf
+    /// profile (or a not-yet-probed session) keeps it visible, and a genuine lack
+    /// of rights then simply errors when a tab is opened rather than the whole
+    /// group vanishing. Logged out → nothing to show.
+    pub(crate) fn admin_group_reachable(&self) -> bool {
+        if self.profile.is_none() {
+            return false;
+        }
+        if self.admin_allowed || !self.admin_probed {
+            return true;
+        }
+        !self.probe_ran_on_root()
+    }
+
+    /// True when the active profile's cluster is the topology root — the only
+    /// context in which a `can_admin` denial is trustworthy.
+    fn probe_ran_on_root(&self) -> bool {
+        match (self.profile.as_ref(), self.topology.as_ref()) {
+            (Some(p), Some(t)) => p.cluster == t.root().name.as_str(),
+            _ => false,
+        }
     }
 
     /// Whether the installed `tsh` supports the command backing `tab`, ignoring

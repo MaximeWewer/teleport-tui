@@ -86,8 +86,10 @@ impl App {
                 // The admin tabs are warmed optimistically by the Clusters handler
                 // (in parallel with this slow probe), so no prefetch is needed
                 // here — that would only duplicate the in-flight ~3s tctl calls.
-                if !ok && self.tab.admin_gated() {
-                    // Rights denied while on an Admin/Recordings tab → fall back to SSH.
+                if !ok && self.tab.admin_gated() && !self.admin_group_reachable() {
+                    // Rights denied *on the root cluster* while on an Admin/Recordings
+                    // tab → fall back to SSH. A leaf-profile denial is inconclusive
+                    // (tctl can't target a leaf), so the tab stays put there.
                     self.switch_tab(Tab::Ssh);
                 }
             }

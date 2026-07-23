@@ -1045,6 +1045,31 @@ fn admin_rights_show_admin_group() {
 }
 
 #[test]
+fn leaf_profile_keeps_admin_group_visible_despite_denied_probe() {
+    // NonAdmin → the bootstrap probe denies rights. But `tctl` has no cluster
+    // flag: on a *leaf* profile it always errors, so that denial is a false
+    // negative and must NOT hide the whole admin group (the root-cluster bug).
+    let mut app = test_app_with_admin(Box::new(NonAdmin));
+    assert!(!app.admin_allowed);
+    if let Some(p) = app.profile.as_mut() {
+        p.cluster = "leaf.example".to_owned(); // not the topology root
+    }
+    assert!(
+        app.tab_visible(Tab::Users),
+        "a leaf-profile denial must not hide admin"
+    );
+    assert!(app.tab_visible(Tab::Tokens));
+    // Back on the root cluster, the same denial IS trustworthy → hidden.
+    if let Some(p) = app.profile.as_mut() {
+        p.cluster = "root.example".to_owned();
+    }
+    assert!(
+        !app.tab_visible(Tab::Users),
+        "a root-cluster denial hides admin"
+    );
+}
+
+#[test]
 fn scp_download_builds_remote_to_local() {
     let mut app = test_app(); // SSH tab, row 0 = web-01 selected
     assert_eq!(app.tab, Tab::Ssh);
