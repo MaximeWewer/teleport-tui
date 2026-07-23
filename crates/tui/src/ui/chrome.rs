@@ -227,7 +227,7 @@ pub(super) fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             Mode::ShowMfa => "↑/↓ select · a add · d remove · Esc/q close",
             Mode::ConfirmMfaRm(_) => "remove this MFA device?  y/Enter confirm  Esc cancel",
             Mode::ShowSessions => "↑/↓ select · Enter join · Esc/q close",
-            Mode::ShowDetail { .. } => "any key to close",
+            Mode::ShowDetail { .. } => "↑/↓ scroll · Esc/q/Enter close",
             Mode::CreateToken => {
                 "type token type (node, app, db, kube…)  Enter generate  Esc cancel"
             }

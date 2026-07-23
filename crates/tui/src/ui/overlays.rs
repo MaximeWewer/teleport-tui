@@ -570,7 +570,12 @@ pub(super) fn render_confirm_token_rm(frame: &mut Frame) {
 /// Read-only full-field detail popup for the selected admin row. Labels are
 /// left-aligned to a common width; long values wrap instead of truncating.
 pub(super) fn render_detail(frame: &mut Frame, app: &App) {
-    let Mode::ShowDetail { title, rows } = &app.mode else {
+    let Mode::ShowDetail {
+        title,
+        rows,
+        scroll,
+    } = &app.mode
+    else {
         return;
     };
     let area = centered(frame.area(), 72, 70);
@@ -609,7 +614,8 @@ pub(super) fn render_detail(frame: &mut Frame, app: &App) {
     frame.render_widget(
         Paragraph::new(lines)
             .block(Block::bordered().title(format!(" {title} ")))
-            .wrap(ratatui::widgets::Wrap { trim: false }),
+            .wrap(ratatui::widgets::Wrap { trim: false })
+            .scroll((*scroll, 0)),
         area,
     );
 }

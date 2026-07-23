@@ -61,11 +61,7 @@ impl App {
             Mode::ShowMfa => self.on_key_mfa(key),
             Mode::ConfirmMfaRm(_) => self.on_key_confirm_mfa_rm(key),
             Mode::ShowSessions => self.on_key_sessions(key),
-            Mode::ShowDetail { .. } => {
-                // Read-only popup: any key closes it.
-                self.mode = Mode::Normal;
-                Outcome::Continue
-            }
+            Mode::ShowDetail { .. } => self.on_key_detail(key),
             Mode::AddUser => self.on_key_add_user(key),
             Mode::ConfirmUserReset(_) => self.on_key_confirm_user_reset(key),
             Mode::Help => {
@@ -667,6 +663,42 @@ impl App {
     }
 
     /// MFA-devices popup: navigate, register a new device, or remove one.
+    /// Read-only detail popup: ↑/↓ and PgUp/PgDn scroll when the fields overflow
+    /// the popup; Home jumps to the top; Esc/q/Enter — or any other key — dismiss.
+    /// The mouse wheel routes here via [`Self::on_scroll`], so it now scrolls the
+    /// content instead of closing the popup.
+    fn on_key_detail(&mut self, key: KeyEvent) -> Outcome {
+        // (amount, up) — `None` means "not a scroll key → dismiss".
+        let step: Option<(u16, bool)> = match key.code {
+            KeyCode::Down | KeyCode::Char('j') => Some((1, false)),
+            KeyCode::Up | KeyCode::Char('k') => Some((1, true)),
+            KeyCode::PageDown => Some((10, false)),
+            KeyCode::PageUp => Some((10, true)),
+            KeyCode::Home => Some((u16::MAX, true)), // to the top
+            _ => None,
+        };
+        let Some((amount, up)) = step else {
+            self.mode = Mode::Normal;
+            return Outcome::Continue;
+        };
+        if let Mode::ShowDetail { rows, scroll, .. } = &mut self.mode {
+            if up {
+                *scroll = scroll.saturating_sub(amount);
+            } else {
+                // One logical line per value (a valueless field still takes one),
+                // matching the render — caps the scroll so it can't run off into
+                // blank space below the last field.
+                let max = rows
+                    .iter()
+                    .map(|(_, v)| u16::try_from(v.len().max(1)).unwrap_or(u16::MAX))
+                    .fold(0u16, u16::saturating_add)
+                    .saturating_sub(1);
+                *scroll = scroll.saturating_add(amount).min(max);
+            }
+        }
+        Outcome::Continue
+    }
+
     fn on_key_mfa(&mut self, key: KeyEvent) -> Outcome {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => {

@@ -497,7 +497,11 @@ impl App {
             };
             rows
         };
-        self.mode = Mode::ShowDetail { title, rows };
+        self.mode = Mode::ShowDetail {
+            title,
+            rows,
+            scroll: 0,
+        };
         Outcome::Continue
     }
 

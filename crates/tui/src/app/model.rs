@@ -154,12 +154,14 @@ pub(crate) enum Mode {
     ConfirmMfaRm(String),
     /// Showing active sessions to join (`tsh sessions ls`); navigate + Enter join.
     ShowSessions,
-    /// Read-only full-field detail popup for the selected admin row (any key
-    /// dismisses). Carries a title + `(label, values)` pairs — each field is a
-    /// list so multi-valued fields (roles, labels) render one item per line.
+    /// Read-only full-field detail popup for the selected admin row. Carries a
+    /// title + `(label, values)` pairs — each field is a list so multi-valued
+    /// fields (roles, labels) render one item per line — plus a vertical scroll
+    /// offset (↑/↓ scroll when the fields overflow the popup; Esc/q/Enter close).
     ShowDetail {
         title: String,
         rows: Vec<(String, Vec<String>)>,
+        scroll: u16,
     },
     /// Choosing which user/login to connect as; carries the pending connection.
     UserPicker(PendingConnect),
