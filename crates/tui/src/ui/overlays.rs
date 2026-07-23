@@ -235,45 +235,44 @@ pub(super) fn render_mfa(frame: &mut Frame, app: &App) {
 pub(super) fn render_sessions(frame: &mut Frame, app: &App) {
     let area = centered(frame.area(), 88, 50);
     frame.render_widget(Clear, area);
-    let mut lines = vec![
-        Line::from(Span::styled(
-            "Active sessions",
-            Style::default().add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-    ];
+    let block = Block::bordered().title(" Active sessions (tsh sessions ls) ");
     if app.sessions.is_empty() {
-        lines.push(Line::from("No active sessions on this cluster."));
-    } else {
-        for (i, s) in app.sessions.iter().enumerate() {
-            let selected = i == app.sessions_sel;
-            let marker = if selected { "▶ " } else { "  " };
-            let style = if selected {
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            lines.push(Line::from(vec![
-                Span::raw(marker),
-                Span::styled(format!("{:<5} {}", s.kind, s.host), style),
+        frame.render_widget(
+            Paragraph::new("No active sessions on this cluster.").block(block),
+            area,
+        );
+        return;
+    }
+    // A stateful List (seeded from `sessions_sel`) so ratatui scrolls to keep the
+    // selected session visible when the list overflows the popup — a plain
+    // Paragraph would let the selection move off-screen out of reach.
+    let items: Vec<ListItem> = app
+        .sessions
+        .iter()
+        .map(|s| {
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("{:<5} {}", s.kind, s.host),
+                    Style::default().fg(Color::Gray),
+                ),
                 Span::styled(
                     format!("   login={} · by {} · {}", s.login, s.started_by, s.created),
                     Style::default().fg(Color::DarkGray),
                 ),
-            ]));
-        }
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "↑/↓ select · Enter join · Esc/q close",
-        Style::default().fg(Color::DarkGray),
-    )));
-    frame.render_widget(
-        Paragraph::new(lines).block(Block::bordered().title(" Active sessions (tsh sessions ls) ")),
-        area,
-    );
+            ]))
+        })
+        .collect();
+    let mut state = ListState::default();
+    state.select(Some(app.sessions_sel));
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("▶ ");
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 pub(super) fn render_forwards(frame: &mut Frame, app: &App) {
