@@ -11,7 +11,8 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::cursor::{MoveTo, Show};
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyEventKind, KeyModifiers,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::style::{
@@ -81,7 +82,13 @@ pub(crate) fn run_interactive(
     // click-drag selects) instead of our tracking sequences.
     disable_raw_mode()?;
     let mut out = io::stdout();
-    execute!(out, DisableMouseCapture, LeaveAlternateScreen, Show)?;
+    execute!(
+        out,
+        DisableBracketedPaste,
+        DisableMouseCapture,
+        LeaveAlternateScreen,
+        Show
+    )?;
     out.flush()?;
 
     // Hand over stdin/stdout/stderr to the child (inherited by default).
@@ -118,7 +125,12 @@ pub(crate) fn run_interactive(
     // scrollback), then re-arm mouse capture — released for the child above — so
     // the wheel scrolls the lists again.
     enable_raw_mode()?;
-    execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        io::stdout(),
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )?;
     terminal.clear()?;
 
     spawn

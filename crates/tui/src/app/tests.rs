@@ -308,6 +308,21 @@ fn search_filters_visible_nodes() {
 }
 
 #[test]
+fn paste_inserts_text_and_drops_control_chars() {
+    let mut app = test_app(); // hosts: web-01, web-02, db-01
+    // A paste outside a text field is ignored (forwarding chars could run 'q'/'r').
+    app.on_paste("web");
+    assert!(matches!(app.mode, Mode::Normal));
+    assert_eq!(app.visible.len(), 3);
+    // In search, a multi-line paste lands in the query with the newline dropped —
+    // staying in Search (not submitted) proves the '\n' didn't act as Enter.
+    app.on_key(press('/'));
+    app.on_paste("we\nb");
+    assert!(matches!(app.mode, Mode::Search));
+    assert_eq!(app.visible.len(), 2); // "web" matches web-01/web-02, not db-01
+}
+
+#[test]
 fn ssh_with_multiple_logins_opens_user_picker() {
     let mut app = test_app();
     // Two logins available -> dropdown, not direct connect.

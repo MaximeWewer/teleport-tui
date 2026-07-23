@@ -29,7 +29,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEvent, KeyEventKind, MouseEventKind,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyEvent, KeyEventKind, MouseEventKind,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
@@ -184,6 +185,12 @@ fn run(terminal: &mut Tui, app: &mut App, refresh: Option<Duration>) -> io::Resu
                         app.on_scroll(down);
                         dirty = true;
                     }
+                }
+                // A bracketed paste: insert the text into the active input field
+                // (control chars dropped, so a pasted newline can't submit).
+                Event::Paste(text) => {
+                    app.on_paste(&text);
+                    dirty = true;
                 }
                 // A resize invalidates the rendered layout.
                 Event::Resize(_, _) => dirty = true,
@@ -402,14 +409,27 @@ impl TerminalGuard {
         // native click-drag text selection is intercepted, so copy/paste needs the
         // usual Shift-modifier. Disabled during any `tsh` handoff (see ssh.rs) so
         // the child session keeps native mouse behaviour.
-        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture)?;
+        // Bracketed paste: a multi-line paste arrives as one `Event::Paste`
+        // instead of individual keystrokes, so a newline in the pasted text can't
+        // submit a form or switch fields mid-paste.
+        execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste
+        )?;
         Ok(Self)
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+        let _ = execute!(
+            io::stdout(),
+            DisableBracketedPaste,
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         let _ = disable_raw_mode();
     }
 }
@@ -417,7 +437,12 @@ impl Drop for TerminalGuard {
 fn install_panic_hook() {
     let original = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+        let _ = execute!(
+            io::stdout(),
+            DisableBracketedPaste,
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         let _ = disable_raw_mode();
         original(info);
     }));

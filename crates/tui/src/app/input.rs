@@ -20,6 +20,41 @@ impl App {
         let _ = self.on_key(KeyEvent::from(code));
     }
 
+    /// Insert bracketed-paste text into the active input field. Only text-editing
+    /// modes accept it (a paste is meaningless in a list/confirm/normal mode, and
+    /// forwarding printable chars there could trigger commands like `q`/`r`).
+    /// Control characters are dropped so a pasted newline/tab can't submit the
+    /// form or switch fields — the whole reason bracketed paste is enabled.
+    pub(crate) fn on_paste(&mut self, text: &str) {
+        if !self.accepts_text_input() {
+            return;
+        }
+        // Reuse each mode's own `Char(c)` handling (it knows which field is
+        // active and which chars it accepts) by replaying the paste as keystrokes.
+        for c in text.chars().filter(|c| !c.is_control()) {
+            let _ = self.on_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+    }
+
+    /// Whether the current mode edits a text field (so a paste should land in it).
+    fn accepts_text_input(&self) -> bool {
+        matches!(
+            self.mode,
+            Mode::Search
+                | Mode::Login(_)
+                | Mode::CreateRequest
+                | Mode::CreateToken
+                | Mode::AddUser
+                | Mode::DbUser { .. }
+                | Mode::AppPort { .. }
+                | Mode::Scp
+                | Mode::SshOptions
+                | Mode::KubeExec { .. }
+                | Mode::Settings
+                | Mode::LoginForm
+        )
+    }
+
     pub(crate) fn on_key(&mut self, key: KeyEvent) -> Outcome {
         // Reset before dispatch; only login/logout set it back to true.
         self.last_was_auth = false;
