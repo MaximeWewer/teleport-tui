@@ -156,20 +156,21 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
         self.list_roles().is_ok()
     }
 
-    /// Switch the active Teleport profile to `proxy` so subsequent `tctl` calls
-    /// target that cluster's auth (`tsh login --proxy=<proxy>`). `tctl` has no
-    /// per-command cluster flag — it always talks to the *currently logged-in*
-    /// proxy — so all-clusters admin must re-select each cluster in turn.
+    /// Select the Teleport `cluster` (root or a trusted leaf under the current
+    /// proxy) so subsequent `tctl` calls target its auth (`tsh login <cluster>`,
+    /// positional). `tctl` has no per-command cluster flag — it always talks to
+    /// the *currently selected* cluster — so all-clusters admin (and scoped admin
+    /// off the root) must re-select each cluster in turn.
     ///
-    /// Non-interactive: succeeds only when a valid cached session for `proxy`
+    /// Non-interactive: succeeds only when a valid cached session for `cluster`
     /// already exists. An `Err(NotAuthenticated)` means a fresh interactive
     /// login is required (the UI hands the terminal to `tsh` for that).
     ///
     /// # Errors
     /// Returns [`DomainError::NotAuthenticated`] when no valid session exists for
-    /// `proxy`, or another [`DomainError`] on spawn failure. Defaults to
+    /// `cluster`, or another [`DomainError`] on spawn failure. Defaults to
     /// "unsupported" so adapters without profile control need not implement it.
-    fn select_cluster(&self, _proxy: &str) -> Result<(), DomainError> {
+    fn select_cluster(&self, _cluster: &str) -> Result<(), DomainError> {
         Err(DomainError::BinaryNotFound)
     }
 }

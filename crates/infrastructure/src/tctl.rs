@@ -179,20 +179,27 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
         self.runner.run(&req).is_ok_and(|o| o.succeeded())
     }
 
-    fn select_cluster(&self, proxy: &str) -> Result<(), DomainError> {
-        // Defence-in-depth: `proxy` comes from the user's config. The `--proxy=`
-        // form already prevents it being reparsed as a flag; also reject empty /
-        // whitespace / control chars so a malformed value can't reshape the argv.
-        if proxy.is_empty() || proxy.chars().any(|c| c.is_whitespace() || c.is_control()) {
-            return Err(DomainError::InvalidValue { field: "proxy" });
+    fn select_cluster(&self, cluster: &str) -> Result<(), DomainError> {
+        // `cluster` is a validated topology name. It becomes a *positional* argv
+        // element, so also reject empty / leading-`-` (flag injection) / whitespace
+        // / control chars, defence-in-depth against a malformed value reshaping argv.
+        if cluster.is_empty()
+            || cluster.starts_with('-')
+            || cluster.chars().any(|c| c.is_whitespace() || c.is_control())
+        {
+            return Err(DomainError::InvalidValue { field: "cluster" });
         }
-        // `tsh login --proxy=<proxy>` re-keys the active profile for that cluster
-        // so the following `tctl` call targets its auth. With a valid cached cert
-        // this is instant and silent; without one tsh would need a password —
-        // impossible here (no tty) — so a non-zero exit means "login required".
+        // `tsh login <cluster>` (POSITIONAL) selects a cluster under the current
+        // proxy — the root or a trusted leaf — so the following `tctl` call, which
+        // targets whatever cluster the profile has selected, hits the right one.
+        // NOT `tsh login --proxy=<cluster>`: `--proxy` is a proxy *address*, not a
+        // cluster, so passing a cluster name there left the selected cluster (and
+        // thus `tctl`) pointed at the previous one. With a valid cached cert this
+        // is instant and silent; without one tsh would need a password — impossible
+        // here (no tty) — so a non-zero exit means "login required".
         let req = CommandRequest::new(
             self.tsh.clone(),
-            vec!["login".to_owned(), format!("--proxy={proxy}")],
+            vec!["login".to_owned(), cluster.to_owned()],
         );
         let outcome = self.runner.run(&req).map_err(|e| DomainError::Backend {
             code: "TSH_SPAWN_FAILED",
