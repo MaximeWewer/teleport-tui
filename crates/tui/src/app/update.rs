@@ -367,31 +367,59 @@ impl App {
             }
             return;
         }
-        let job = if self.tab.is_admin() {
-            match self.tab {
+        if self.tab.is_admin() {
+            let job = match self.tab {
                 Tab::Users => Job::Users,
                 Tab::Roles => Job::Roles,
                 Tab::Tokens => Job::Tokens,
                 Tab::Bots => Job::Bots,
                 Tab::Inventory => Job::Instances,
                 _ => return, // non-admin tab can't reach the admin branch
-            }
-        } else {
-            // Cluster-scoped tabs need a selected cluster context.
-            let Some(ctx) = self.topology.as_ref().map(|t| t.selected().clone()) else {
-                return;
             };
-            match self.tab {
-                Tab::Ssh => Job::Nodes(ctx),
-                Tab::Kube => Job::Kube(ctx),
-                Tab::Db => Job::Db(ctx),
-                Tab::Apps => Job::Apps(ctx),
-                Tab::Requests => Job::Requests(ctx),
-                Tab::Recordings => Job::Recordings(ctx),
-                Tab::Users | Tab::Roles | Tab::Tokens | Tab::Bots | Tab::Inventory => return,
-            }
+            // Admin listings go through `tctl`, which targets the profile's current
+            // cluster (not the UI's -c). Re-key the selected cluster first so a leaf
+            // profile can't make this error; the fan-out already does this per
+            // cluster in all-clusters mode.
+            self.dispatch_admin_scoped(job);
+            return;
+        }
+        // Cluster-scoped tabs need a selected cluster context.
+        let Some(ctx) = self.topology.as_ref().map(|t| t.selected().clone()) else {
+            return;
+        };
+        let job = match self.tab {
+            Tab::Ssh => Job::Nodes(ctx),
+            Tab::Kube => Job::Kube(ctx),
+            Tab::Db => Job::Db(ctx),
+            Tab::Apps => Job::Apps(ctx),
+            Tab::Requests => Job::Requests(ctx),
+            Tab::Recordings => Job::Recordings(ctx),
+            Tab::Users | Tab::Roles | Tab::Tokens | Tab::Bots | Tab::Inventory => return,
         };
         self.dispatch_tab(job);
+    }
+
+    /// Dispatch a single-cluster admin listing that must run against the selected
+    /// cluster's profile — re-keys it (and restores root) around the `tctl` call
+    /// via [`Dispatcher::spawn_admin_scoped`]. Falls back to a plain dispatch if
+    /// the topology isn't known yet (nothing to re-key to).
+    fn dispatch_admin_scoped(&mut self, job: Job) {
+        let Some((cluster, root)) = self
+            .topology
+            .as_ref()
+            .map(|t| (t.selected().name.to_string(), t.root().name.to_string()))
+        else {
+            self.dispatch_tab(job);
+            return;
+        };
+        self.tab_req += 1;
+        self.loading = true;
+        self.visible.clear();
+        self.table.select(None);
+        let seq = self.tab_req;
+        if let Some((seq, result)) = self.dispatcher.spawn_admin_scoped(seq, job, cluster, root) {
+            self.apply(seq, result);
+        }
     }
 
     /// Fan out one aggregate job per online cluster for the active tab. A

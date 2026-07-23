@@ -546,6 +546,55 @@ impl AdminRepository for RootOnlyAdmin {
     }
 }
 
+/// Admin that records every `select_cluster` (profile re-key) in order, to prove
+/// the scoped-admin path re-keys the viewed cluster around the `tctl` call.
+#[derive(Debug)]
+struct RecordingAdmin(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+impl AdminRepository for RecordingAdmin {
+    fn list_users(&self) -> Result<Vec<AdminUser>, DomainError> {
+        Ok(vec![AdminUser {
+            name: domain::value::ResourceName::try_from("alice").unwrap(),
+            roles: vec![],
+            labels: vec![],
+        }])
+    }
+    fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
+        Ok(vec![])
+    }
+    fn generate_token(&self, _t: &str) -> Result<GeneratedToken, DomainError> {
+        Err(DomainError::BinaryNotFound)
+    }
+    fn select_cluster(&self, proxy: &str) -> Result<(), DomainError> {
+        self.0.lock().unwrap().push(proxy.to_owned());
+        Ok(())
+    }
+}
+
+#[test]
+fn scoped_admin_rekeys_selected_cluster_then_restores_root() {
+    let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let mut app = test_app_with_admin(Box::new(RecordingAdmin(calls.clone())));
+    // View a leaf cluster — the UI selection the tsh profile does NOT follow, so
+    // a naive `tctl` listing would hit whatever ~/.tsh last pointed at.
+    app.topology
+        .as_mut()
+        .unwrap()
+        .select(&ClusterName::try_from("leaf.example").unwrap())
+        .unwrap();
+    calls.lock().unwrap().clear();
+
+    app.tab = Tab::Users;
+    app.reload_active();
+
+    // Re-keyed the viewed leaf before the listing, then restored root after.
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec!["leaf.example".to_owned(), "root.example".to_owned()]
+    );
+    // The listing still lands (one user).
+    assert_eq!(app.visible.len(), 1);
+}
+
 #[test]
 fn admin_tab_aggregates_across_clusters() {
     let counter = std::sync::Arc::new(AtomicUsize::new(0));

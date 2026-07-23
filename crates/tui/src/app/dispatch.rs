@@ -347,6 +347,50 @@ impl Dispatcher {
         None
     }
 
+    /// Run a single-cluster admin (`tctl`) job against `cluster` by re-keying the
+    /// profile to it first (`tsh login --proxy`), then restoring `root`. `tctl`
+    /// has no cluster flag — it targets whatever cluster `~/.tsh` currently points
+    /// at — so without this a scoped admin listing would hit a leaf profile (the
+    /// UI's cluster selection does not re-key the profile) and error. Runs on a
+    /// dedicated thread under [`profile_lock`], serialised against the admin
+    /// fan-out and the after-action restore so the shared profile can't be flipped
+    /// mid-listing. Restoring to root (not the leaf) leaves the profile where the
+    /// follow-up admin *actions* (`tokens add`, `users add`, …) also work. The
+    /// listing's `JobResult` type is unchanged; only its execution is wrapped.
+    ///
+    /// [`profile_lock`]: Dispatcher::profile_lock
+    pub(super) fn spawn_admin_scoped(
+        &self,
+        seq: u64,
+        job: Job,
+        cluster: String,
+        root: String,
+    ) -> Option<(u64, JobResult)> {
+        if self.synchronous {
+            let _ = self.repos.admin.select_cluster(&cluster);
+            let result = run_job(&self.repos, job);
+            let _ = self.repos.admin.select_cluster(&root);
+            return Some((seq, result));
+        }
+        let repos = Arc::clone(&self.repos);
+        let tx = self.job_tx.clone();
+        let profile_lock = Arc::clone(&self.profile_lock);
+        std::thread::spawn(move || {
+            let result = {
+                let _guard = profile_lock
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let _ = repos.admin.select_cluster(&cluster);
+                let out = run_job(&repos, job);
+                // Restore root inside the critical section (see spawn_admin_stream).
+                let _ = repos.admin.select_cluster(&root);
+                out
+            };
+            let _ = tx.send((seq, result));
+        });
+        None
+    }
+
     /// All-clusters admin fan-out, **streamed serially**: `tctl` has no cluster
     /// flag, so we re-select each cluster in turn (one thread — a parallel switch
     /// would race), but emit one `AggregateAdmin` result *per cluster* as it
