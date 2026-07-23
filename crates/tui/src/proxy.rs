@@ -13,6 +13,98 @@ use std::sync::mpsc;
 use std::thread::{self, sleep};
 use std::time::Duration;
 
+/// How many fresh ports to try when an auto-allocated one is lost to the TOCTOU
+/// race (see [`start_listening_proxy`]). Small: a real collision is rare, and a
+/// genuine failure (login/MFA) is diagnosed and stops the loop after one try.
+const PORT_RETRIES: usize = 3;
+
+/// Outcome of one proxy-start attempt, so the caller can tell a lost-port race
+/// (worth retrying on a new port) from a real failure (retrying won't help).
+enum Attempt<T> {
+    Ready(T),
+    /// The child exited before it was ready — the auto-allocated port was almost
+    /// certainly taken between `free_port()` releasing it and the child binding
+    /// it. Retrying on a fresh port should succeed.
+    PortLost,
+    /// The child is alive but never became ready (stuck on a login/MFA prompt it
+    /// can't answer with detached stdin, say) — not a port problem, so surface it.
+    Failed(io::Error),
+}
+
+/// Wait until the child accepts a TCP connection on `port`. A child that exits
+/// first lost the port ([`Attempt::PortLost`], retryable); one still alive after
+/// the grace period is stuck on something a new port wouldn't fix
+/// ([`Attempt::Failed`]).
+fn await_listen(child: &mut Child, port: u16) -> Attempt<()> {
+    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
+    for _ in 0..30 {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            return Attempt::PortLost;
+        }
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
+            return Attempt::Ready(());
+        }
+        sleep(Duration::from_millis(100));
+    }
+    Attempt::Failed(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "proxy did not start in time (log into the app/db first, or MFA may be required)",
+    ))
+}
+
+/// Spawn a background proxy that becomes ready by *listening* on a local port
+/// (app / db). For an explicit `port` a single attempt is made — a conflict on
+/// the user's chosen port is theirs to resolve, not silently relocated. For an
+/// auto port the OS-picked number can be stolen in the TOCTOU window between
+/// `free_port()` and the child's own bind, so a lost race retries on a fresh one.
+/// Returns the live child plus the port it is actually listening on.
+fn start_listening_proxy(
+    port: Option<u16>,
+    spawn: impl Fn(u16) -> io::Result<Child>,
+) -> io::Result<(Child, u16)> {
+    if let Some(p) = port {
+        let mut child = spawn(p)?;
+        return match await_listen(&mut child, p) {
+            Attempt::Ready(()) => Ok((child, p)),
+            Attempt::PortLost => {
+                let _ = child.wait();
+                Err(io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    "the requested local port is already in use",
+                ))
+            }
+            Attempt::Failed(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                Err(e)
+            }
+        };
+    }
+    let mut last: Option<io::Error> = None;
+    for _ in 0..PORT_RETRIES {
+        let port = free_port()?;
+        let mut child = spawn(port)?;
+        match await_listen(&mut child, port) {
+            Attempt::Ready(()) => return Ok((child, port)),
+            // Racey port: the child already exited — reap it and try another.
+            Attempt::PortLost => {
+                let _ = child.wait();
+                last = Some(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "proxy did not start (a free local port kept being taken)",
+                ));
+            }
+            // Real failure: stop retrying and surface it.
+            Attempt::Failed(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(e);
+            }
+        }
+    }
+    Err(last.unwrap_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "proxy did not start")))
+}
+
 /// Start `tsh proxy app <name> -c <cluster> -p <port>` in the background, wait
 /// until it is listening, open the browser at the local URL, and return the
 /// child handle (to stop it later) plus the URL.
@@ -21,7 +113,8 @@ use std::time::Duration;
 /// no shell. The URL is a fixed `http://127.0.0.1:<port>` we control.
 ///
 /// `port` is the caller-requested local port; `None` allocates a random free
-/// one. A requested port already in use surfaces as a normal spawn/listen error.
+/// one (retried on a fresh port if it loses the TOCTOU race — see
+/// [`start_listening_proxy`]). A requested port already in use is an error.
 ///
 /// # Errors
 /// Returns an error if a port can't be allocated, the proxy can't be spawned,
@@ -32,27 +125,14 @@ pub(crate) fn open_app(
     cluster: &str,
     port: Option<u16>,
 ) -> io::Result<(Child, String)> {
-    let port = match port {
-        Some(p) => p,
-        None => free_port()?,
-    };
-    let port_s = port.to_string();
-    let mut child = Command::new(tsh)
-        .args(["proxy", "app", name, "-c", cluster, "-p", &port_s])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-
-    if !wait_ready(port) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "app proxy did not start in time (try logging into the app first)",
-        ));
-    }
-
+    let (child, port) = start_listening_proxy(port, |p| {
+        Command::new(tsh)
+            .args(["proxy", "app", name, "-c", cluster, "-p", &p.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    })?;
     let url = format!("http://127.0.0.1:{port}");
     open_browser(&url);
     Ok((child, url))
@@ -63,7 +143,8 @@ pub(crate) fn open_app(
 /// user to point a DB client at. `--tunnel` authenticates via the database's
 /// client certificate, so the GUI tool connects without extra credentials.
 ///
-/// `port` is the requested local port; `None` allocates a random free one.
+/// `port` is the requested local port; `None` allocates a random free one
+/// (retried on a fresh port if it loses the TOCTOU race).
 ///
 /// # Errors
 /// Returns an error if a port can't be allocated, the proxy can't spawn, or it
@@ -74,29 +155,23 @@ pub(crate) fn open_db(
     cluster: &str,
     port: Option<u16>,
 ) -> io::Result<(Child, String)> {
-    let port = match port {
-        Some(p) => p,
-        None => free_port()?,
-    };
-    let port_s = port.to_string();
-    let mut child = Command::new(tsh)
-        .args([
-            "proxy", "db", name, "-c", cluster, "--tunnel", "-p", &port_s,
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-
-    if !wait_ready(port) {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "db proxy did not start in time (try `tsh db login` first)",
-        ));
-    }
-
+    let (child, port) = start_listening_proxy(port, |p| {
+        Command::new(tsh)
+            .args([
+                "proxy",
+                "db",
+                name,
+                "-c",
+                cluster,
+                "--tunnel",
+                "-p",
+                &p.to_string(),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    })?;
     Ok((child, format!("127.0.0.1:{port}")))
 }
 
@@ -107,6 +182,10 @@ pub(crate) fn open_db(
 /// we hand off a clean shell ourselves — so `tsh`'s raw-mode preamble never
 /// corrupts the user's terminal (no "staircase" output, resize works).
 ///
+/// The auto-allocated local port can be lost to the TOCTOU race between
+/// `free_port()` and the child's bind, so a lost race retries on a fresh port
+/// (see [`kube_proxy_attempt`]).
+///
 /// # Errors
 /// Returns an error if a port can't be allocated, the proxy can't spawn, or it
 /// doesn't print its kubeconfig path in time.
@@ -116,7 +195,36 @@ pub(crate) fn start_kube_proxy(
     cluster: &str,
     user: Option<&str>,
 ) -> io::Result<(Child, String)> {
-    let port = free_port()?;
+    let mut last: Option<io::Error> = None;
+    for _ in 0..PORT_RETRIES {
+        let port = free_port()?;
+        match kube_proxy_attempt(tsh, kube, cluster, user, port) {
+            Attempt::Ready(ok) => return Ok(ok),
+            // Racey port (child already gone): try another.
+            Attempt::PortLost => {
+                last = Some(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "kube proxy could not bind a free local port",
+                ));
+            }
+            // Real failure (login/MFA, spawn error): stop and surface it.
+            Attempt::Failed(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "kube proxy did not start")))
+}
+
+/// One `tsh proxy kube` start attempt on a specific `port`. Readiness is the
+/// `KUBECONFIG` line printed on stdout. If the wait fails, a child that has
+/// *exited* lost the port ([`Attempt::PortLost`], retryable); one still *alive*
+/// is stuck on login/MFA it can't answer with detached stdin ([`Attempt::Failed`]).
+fn kube_proxy_attempt(
+    tsh: &Path,
+    kube: &str,
+    cluster: &str,
+    user: Option<&str>,
+    port: u16,
+) -> Attempt<(Child, String)> {
     let port_s = port.to_string();
     let mut cmd = Command::new(tsh);
     cmd.args(["proxy", "kube", kube, "-c", cluster, "-p", &port_s]);
@@ -126,12 +234,15 @@ pub(crate) fn start_kube_proxy(
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = cmd.spawn()?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return Attempt::Failed(e),
+    };
 
     let Some(stdout) = child.stdout.take() else {
         let _ = child.kill();
         let _ = child.wait();
-        return Err(io::Error::other("proxy stdout unavailable"));
+        return Attempt::Failed(io::Error::other("proxy stdout unavailable"));
     };
 
     // Read the proxy's output on a thread; report the kubeconfig path once seen,
@@ -149,11 +260,18 @@ pub(crate) fn start_kube_proxy(
     });
 
     if let Ok(path) = rx.recv_timeout(Duration::from_secs(8)) {
-        Ok((child, path))
+        return Attempt::Ready((child, path));
+    }
+    // A taken port makes tsh exit at once (stdout EOF ends the reader, so the
+    // recv fails fast); a still-alive child is stuck on something a new port
+    // won't fix.
+    let exited = matches!(child.try_wait(), Ok(Some(_)));
+    let _ = child.kill();
+    let _ = child.wait();
+    if exited {
+        Attempt::PortLost
     } else {
-        let _ = child.kill();
-        let _ = child.wait();
-        Err(io::Error::new(
+        Attempt::Failed(io::Error::new(
             io::ErrorKind::TimedOut,
             "kube proxy did not report its kubeconfig in time",
         ))
@@ -263,22 +381,13 @@ fn default_shell() -> String {
     std::env::var("ComSpec").unwrap_or_else(|_| "cmd".to_owned())
 }
 
-/// Ask the OS to allocate a free localhost port (bind to :0, then release).
+/// Ask the OS to allocate a free localhost port (bind to :0, then release). The
+/// port can be re-taken before the child binds it, so callers that use this for
+/// an auto port go through [`start_listening_proxy`] / [`start_kube_proxy`],
+/// which retry on a fresh port when that race is lost.
 fn free_port() -> io::Result<u16> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
     Ok(listener.local_addr()?.port())
-}
-
-/// Poll until the proxy accepts a TCP connection (or give up after ~3s).
-fn wait_ready(port: u16) -> bool {
-    let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
-    for _ in 0..30 {
-        if TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
-            return true;
-        }
-        sleep(Duration::from_millis(100));
-    }
-    false
 }
 
 /// Open the default browser at `url` (best-effort, per-OS, no shell metachars —
@@ -317,6 +426,30 @@ fn browser_command(url: &str) -> Command {
 #[cfg(test)]
 mod tests {
     use super::local_forward_port;
+
+    // A child that exits at once never listens, so every auto-port attempt reads
+    // as a lost port (`PortLost`); the loop should exhaust `PORT_RETRIES` and then
+    // give up with an error rather than hang or succeed. `true` fits: it exits 0
+    // immediately and binds nothing.
+    #[cfg(unix)]
+    #[test]
+    fn auto_port_gives_up_after_retries_when_child_never_listens() {
+        use super::{PORT_RETRIES, start_listening_proxy};
+        use std::process::{Command, Stdio};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let attempts = AtomicUsize::new(0);
+        let result = start_listening_proxy(None, |_port| {
+            attempts.fetch_add(1, Ordering::Relaxed);
+            Command::new("true")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        });
+        assert!(result.is_err(), "should give up, not succeed");
+        assert_eq!(attempts.load(Ordering::Relaxed), PORT_RETRIES);
+    }
 
     #[test]
     fn local_forward_port_parses_localhost_binds_only() {
