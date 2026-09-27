@@ -41,7 +41,11 @@ impl<R: CommandRunner> ClusterRepository for TshClusterRepository<R> {
         let mut selected: Option<ClusterName> = None;
         let mut contexts = Vec::with_capacity(dtos.len());
         for dto in dtos {
-            let name = ClusterName::try_from(dto.cluster_name)?;
+            // Skip (don't fail on) a row whose name we refuse: one odd entry must
+            // not blank the whole list.
+            let Ok(name) = ClusterName::try_from(dto.cluster_name) else {
+                continue;
+            };
             let kind = parse_kind(&dto.cluster_type)?;
             let status = parse_status(&dto.status);
             if dto.selected {
@@ -103,5 +107,21 @@ mod tests {
         assert_eq!(topo.root().name.as_str(), "root.example.com");
         assert_eq!(topo.selected().name.as_str(), "root.example.com");
         assert_eq!(topo.leaves().count(), 4);
+    }
+
+    #[test]
+    fn skips_clusters_with_invalid_names() {
+        let runner = FakeRunner {
+            stdout: r#"[
+                {"cluster_name":"root.example.com","status":"online","cluster_type":"root","selected":true},
+                {"cluster_name":"leaf;rm -rf","status":"online","cluster_type":"leaf","selected":false},
+                {"cluster_name":"leaf1","status":"offline","cluster_type":"leaf","selected":false}
+            ]"#
+            .to_owned(),
+        };
+        let repo = TshClusterRepository::new(runner, PathBuf::from("tsh"));
+        let topo = repo.list_clusters().unwrap();
+        assert_eq!(topo.all().len(), 2);
+        assert_eq!(topo.leaves().next().unwrap().name.as_str(), "leaf1");
     }
 }
