@@ -134,7 +134,7 @@ impl App {
         self.cache_key.remove(&self.tab);
         // Drop every cluster's cached slice for this tab so `r` re-fetches them all.
         let tab = self.tab;
-        self.agg_cache.retain(|(t, _), _| *t != tab);
+        self.agg.cache.retain(|(t, _), _| *t != tab);
         self.reload_active();
     }
 
@@ -237,7 +237,7 @@ impl App {
                     return Outcome::Continue;
                 };
                 // Index 0 = "All clusters"; real clusters are offset by 1.
-                let sel = if self.aggregate {
+                let sel = if self.agg.enabled {
                     0
                 } else {
                     topo.all()

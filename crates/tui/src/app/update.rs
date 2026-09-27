@@ -64,7 +64,7 @@ impl App {
                     .is_none_or(|old| online(old) != online(&topo));
                 self.topology = Some(topo);
                 if changed {
-                    self.agg_cache.clear();
+                    self.agg.cache.clear();
                 }
                 self.reload_active();
                 // Warm every other tab in the background so switches are instant.
@@ -193,7 +193,7 @@ impl App {
     /// the rows are cached per `(tab, cluster)` regardless of the active view, so
     /// partial progress survives navigating away (a transient error is not
     /// cached, so it retries); the live view is updated only when this slice
-    /// belongs to the current fan-out (matching `agg_seq` and active `tab`).
+    /// belongs to the current fan-out (matching `agg.seq` and active `tab`).
     fn apply_agg_cluster(
         &mut self,
         seq: u64,
@@ -203,15 +203,15 @@ impl App {
         cache: bool,
     ) {
         if cache {
-            self.agg_cache.insert((tab, cluster.clone()), rows.clone());
+            self.agg.cache.insert((tab, cluster.clone()), rows.clone());
         }
         // Only touch the visible aggregate if this slice is for it.
-        if seq != self.agg_seq || tab != self.tab {
+        if seq != self.agg.seq || tab != self.tab {
             return;
         }
-        self.agg_pending = self.agg_pending.saturating_sub(1);
-        self.agg_rows.extend(rows);
-        if self.agg_pending == 0 {
+        self.agg.pending = self.agg.pending.saturating_sub(1);
+        self.agg.rows.extend(rows);
+        if self.agg.pending == 0 {
             self.loading = false;
         }
         self.recompute_visible();
@@ -221,8 +221,8 @@ impl App {
     /// Status line for the aggregate view: reachable row count plus any clusters
     /// still needing a login.
     fn set_agg_status(&mut self) {
-        let reachable = self.agg_rows.iter().filter(|r| !r.login_required).count();
-        let need_login = self.agg_rows.iter().filter(|r| r.login_required).count();
+        let reachable = self.agg.rows.iter().filter(|r| !r.login_required).count();
+        let need_login = self.agg.rows.iter().filter(|r| r.login_required).count();
         self.status = Some(if need_login > 0 {
             format!(
                 "{reachable} {} across all clusters · {need_login} cluster(s) need login (L)",
@@ -313,7 +313,7 @@ impl App {
     /// tabs is instant. Skips the active tab (loaded by `reload_active`), hidden
     /// tabs, already-cached tabs, and aggregate mode (own per-tab fan-out cache).
     pub(super) fn prefetch_all(&mut self) {
-        if self.aggregate {
+        if self.agg.enabled {
             return;
         }
         let cluster = self
@@ -383,7 +383,7 @@ impl App {
         // per cluster (`tsh -c`); tabs with no cluster flag (admin tabs +
         // Recordings) run a serial fan-out that re-selects each cluster's profile
         // and streams results as they arrive.
-        if self.aggregate {
+        if self.agg.enabled {
             if self.tab.serial_aggregation() {
                 self.dispatch_aggregate_admin();
             } else {
@@ -436,11 +436,11 @@ impl App {
     /// completed fan-out is cached per tab, so revisiting a tab in all-clusters
     /// mode shows instantly instead of refanning (cleared on `r`/topology change).
     /// Seed the aggregate view from the per-cluster cache and return the online
-    /// clusters not yet cached (to be fetched). Bumps `agg_seq` (invalidating any
+    /// clusters not yet cached (to be fetched). Bumps `agg.seq` (invalidating any
     /// in-flight fan-out) and resets the view; cached clusters render immediately.
     fn seed_agg_from_cache(&mut self, clusters: &[ClusterContext]) -> Vec<ClusterContext> {
-        self.agg_seq += 1;
-        self.agg_rows.clear();
+        self.agg.seq += 1;
+        self.agg.rows.clear();
         self.visible.clear(); // count reads (0) until cached/fresh rows land
         self.table.select(None);
         let tab = self.tab;
@@ -448,19 +448,19 @@ impl App {
         // promote them into the aggregate cache so we render them instantly instead
         // of refetching the cluster we just left.
         if let Some((name, rows)) = self.scoped_agg_seed(tab)
-            && !self.agg_cache.contains_key(&(tab, name.clone()))
+            && !self.agg.cache.contains_key(&(tab, name.clone()))
         {
-            self.agg_cache.insert((tab, name), rows);
+            self.agg.cache.insert((tab, name), rows);
         }
         let mut missing = Vec::new();
         for ctx in clusters {
-            if let Some(rows) = self.agg_cache.get(&(tab, ctx.name.clone())) {
-                self.agg_rows.extend(rows.clone());
+            if let Some(rows) = self.agg.cache.get(&(tab, ctx.name.clone())) {
+                self.agg.rows.extend(rows.clone());
             } else {
                 missing.push(ctx.clone());
             }
         }
-        self.agg_pending = missing.len();
+        self.agg.pending = missing.len();
         self.loading = !missing.is_empty();
         self.recompute_visible();
         self.set_agg_status();
@@ -519,7 +519,7 @@ impl App {
         };
         // Cached clusters render instantly; fetch only the missing ones.
         let missing = self.seed_agg_from_cache(&clusters);
-        let seq = self.agg_seq;
+        let seq = self.agg.seq;
         let tab = self.tab;
         for ctx in missing {
             self.send(seq, Job::Aggregate { tab, ctx }, Lane::Other);
@@ -541,7 +541,7 @@ impl App {
         if missing.is_empty() {
             return;
         }
-        let seq = self.agg_seq;
+        let seq = self.agg.seq;
         let tab = self.tab;
         // Streamed serially: each cluster's rows render (and cache) as they arrive.
         for (seq, result) in self.dispatcher.spawn_admin_stream(seq, tab, missing, root) {
@@ -554,7 +554,8 @@ impl App {
         let filtering = self.mode == Mode::Search && !needle.is_empty();
         let keep = |matched: bool| !filtering || matched;
         self.visible = if self.aggregating() {
-            self.agg_rows
+            self.agg
+                .rows
                 .iter()
                 .enumerate()
                 .filter(|(_, r)| keep(r.matches(&needle)))

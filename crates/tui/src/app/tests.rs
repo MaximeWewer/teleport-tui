@@ -736,7 +736,7 @@ fn admin_tab_aggregates_across_clusters() {
     app.on_key(press('c'));
     app.on_key(KeyEvent::from(KeyCode::Up));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.aggregate);
+    assert!(app.agg.enabled);
     // Users fans out across both online clusters (root + leaf), each row tagged
     // with its cluster, none login-required (the fake profile switch succeeds).
     // Root's rows were already loaded scoped (`tctl` targets the root proxy), so
@@ -744,22 +744,24 @@ fn admin_tab_aggregates_across_clusters() {
     app.on_key(press('5'));
     assert_eq!(app.tab, Tab::Users);
     assert_eq!(counter.load(Ordering::SeqCst), 1);
-    assert_eq!(app.agg_rows.len(), 2);
-    assert!(app.agg_rows.iter().all(|r| !r.login_required));
+    assert_eq!(app.agg.rows.len(), 2);
+    assert!(app.agg.rows.iter().all(|r| !r.login_required));
     assert!(
-        app.agg_rows
+        app.agg
+            .rows
             .iter()
             .any(|r| r.cluster.as_str() == "root.example")
     );
     assert!(
-        app.agg_rows
+        app.agg
+            .rows
             .iter()
             .any(|r| r.cluster.as_str() == "leaf.example")
     );
     // Leave and return - the fan-out is cached per tab (no refetch).
     app.on_key(press('1')); // SSH (aggregated)
     app.on_key(press('5')); // Users again
-    assert!(app.aggregate, "still in all-clusters view");
+    assert!(app.agg.enabled, "still in all-clusters view");
     assert_eq!(counter.load(Ordering::SeqCst), 1);
     // `r` drops both the scoped and aggregate caches, so it re-fans every
     // cluster (root can no longer be reused): one call per cluster.
@@ -773,26 +775,28 @@ fn admin_aggregate_marks_unauthenticated_clusters_login_required() {
     app.on_key(press('c'));
     app.on_key(KeyEvent::from(KeyCode::Up));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.aggregate);
+    assert!(app.agg.enabled);
     app.on_key(press('5')); // Users
     assert_eq!(app.tab, Tab::Users);
     // root.example → one real row; leaf.example → a login-required placeholder.
-    assert_eq!(app.agg_rows.len(), 2);
+    assert_eq!(app.agg.rows.len(), 2);
     let root = app
-        .agg_rows
+        .agg
+        .rows
         .iter()
         .find(|r| r.cluster.as_str() == "root.example")
         .unwrap();
     assert!(!root.login_required);
     let leaf = app
-        .agg_rows
+        .agg
+        .rows
         .iter()
         .find(|r| r.cluster.as_str() == "leaf.example")
         .unwrap();
     assert!(leaf.login_required);
     // Selecting the placeholder and pressing `L` opens the login FORM
     // pre-filled with that leaf's proxy (not a raw terminal handoff).
-    let idx = app.agg_rows.iter().position(|r| r.login_required).unwrap();
+    let idx = app.agg.rows.iter().position(|r| r.login_required).unwrap();
     app.table.select(Some(idx));
     assert!(matches!(app.on_key(press('L')), Outcome::Continue));
     assert_eq!(app.mode, Mode::LoginForm);
@@ -839,7 +843,7 @@ fn aggregate_reuses_cached_clusters_and_fetches_only_missing() {
     let counter = std::sync::Arc::new(AtomicUsize::new(0));
     let mut app = test_app_with_admin(Box::new(CountingAdmin(counter.clone())));
     // Pretend one cluster's Users slice was cached by an earlier partial fan-out.
-    app.agg_cache.insert(
+    app.agg.cache.insert(
         (Tab::Users, cn("root.example")),
         vec![AggRow {
             cluster: cn("root.example"),
@@ -861,12 +865,14 @@ fn aggregate_reuses_cached_clusters_and_fetches_only_missing() {
         "only the missing cluster fetched"
     );
     assert!(
-        app.agg_rows
+        app.agg
+            .rows
             .iter()
             .any(|r| r.cluster.as_str() == "root.example")
     ); // from cache
     assert!(
-        app.agg_rows
+        app.agg
+            .rows
             .iter()
             .any(|r| r.cluster.as_str() == "leaf.example")
     ); // freshly fetched
@@ -886,7 +892,7 @@ fn agg_slice_caches_per_cluster_even_when_off_tab() {
         sid: None,
     }];
     app.apply(
-        app.agg_seq,
+        app.agg.seq,
         JobResult::AggregateAdmin {
             tab: Tab::Roles,
             cluster: cn("leaf.example"),
@@ -894,7 +900,8 @@ fn agg_slice_caches_per_cluster_even_when_off_tab() {
         },
     );
     assert!(
-        app.agg_cache
+        app.agg
+            .cache
             .contains_key(&(Tab::Roles, cn("leaf.example"))),
         "the slice is cached per (tab, cluster) regardless of the current view"
     );
@@ -903,10 +910,10 @@ fn agg_slice_caches_per_cluster_even_when_off_tab() {
 #[test]
 fn aggregate_error_renders_an_error_row_without_caching_it() {
     let mut app = test_app();
-    app.aggregate = true;
-    app.agg_pending = 1;
+    app.agg.enabled = true;
+    app.agg.pending = 1;
     app.apply(
-        app.agg_seq,
+        app.agg.seq,
         JobResult::Aggregate {
             tab: Tab::Ssh,
             cluster: cn("leaf.example"),
@@ -916,11 +923,11 @@ fn aggregate_error_renders_an_error_row_without_caching_it() {
         },
     );
     // Shown like the admin path's error row, not silently dropped...
-    assert_eq!(app.agg_rows.len(), 1);
-    assert_eq!(app.agg_rows[0].cluster.as_str(), "leaf.example");
-    assert!(app.agg_rows[0].cells[0].contains("offline"));
+    assert_eq!(app.agg.rows.len(), 1);
+    assert_eq!(app.agg.rows[0].cluster.as_str(), "leaf.example");
+    assert!(app.agg.rows[0].cells[0].contains("offline"));
     // ...but not cached, so the next visit retries the cluster.
-    assert!(!app.agg_cache.contains_key(&(Tab::Ssh, cn("leaf.example"))));
+    assert!(!app.agg.cache.contains_key(&(Tab::Ssh, cn("leaf.example"))));
 }
 
 /// An aggregate view holding only `cluster`'s listing-error row on `tab`, with
@@ -928,10 +935,10 @@ fn aggregate_error_renders_an_error_row_without_caching_it() {
 fn app_with_error_row(tab: Tab) -> App {
     let mut app = test_app();
     app.tab = tab;
-    app.aggregate = true;
-    app.agg_pending = 1;
+    app.agg.enabled = true;
+    app.agg.pending = 1;
     app.apply(
-        app.agg_seq,
+        app.agg.seq,
         JobResult::Aggregate {
             tab,
             cluster: cn("leaf.example"),
@@ -940,7 +947,7 @@ fn app_with_error_row(tab: Tab) -> App {
             }),
         },
     );
-    assert!(app.agg_rows[0].error);
+    assert!(app.agg.rows[0].error);
     app.table.select(Some(0));
     app
 }
@@ -990,20 +997,22 @@ fn recordings_aggregate_across_clusters_and_play() {
     app.on_key(press('c'));
     app.on_key(KeyEvent::from(KeyCode::Up));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.aggregate);
+    assert!(app.agg.enabled);
     app.switch_tab(Tab::Recordings);
     assert_eq!(app.tab, Tab::Recordings);
     // FakeRecordings yields 1 recording per cluster × 2 online clusters, each
     // carrying its sid (not a visible column) and tagged with its cluster.
-    assert_eq!(app.agg_rows.len(), 2);
-    assert!(app.agg_rows.iter().all(|r| !r.login_required));
+    assert_eq!(app.agg.rows.len(), 2);
+    assert!(app.agg.rows.iter().all(|r| !r.login_required));
     assert!(
-        app.agg_rows
+        app.agg
+            .rows
             .iter()
             .all(|r| r.sid.as_deref() == Some("sess-0001"))
     );
     assert!(
-        app.agg_rows
+        app.agg
+            .rows
             .iter()
             .any(|r| r.cluster.as_str() == "leaf.example")
     );
@@ -1022,23 +1031,25 @@ fn all_clusters_aggregate_merges_and_connects_directly() {
     app.on_key(press('c'));
     app.on_key(KeyEvent::from(KeyCode::Up));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.aggregate);
+    assert!(app.agg.enabled);
     // 3 nodes × 2 online clusters (root + leaf) = 6 aggregate rows.
-    assert_eq!(app.agg_rows.len(), 6);
+    assert_eq!(app.agg.rows.len(), 6);
     assert!(
-        app.agg_rows
+        app.agg
+            .rows
             .iter()
             .any(|r| r.cluster.as_str() == "root.example")
     );
     assert!(
-        app.agg_rows
+        app.agg
+            .rows
             .iter()
             .any(|r| r.cluster.as_str() == "leaf.example")
     );
     // Enter connects DIRECTLY (no drill-down): row 0 is root.example/web-01.
     app.table.select(Some(0));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.aggregate, "stays in all-clusters view");
+    assert!(app.agg.enabled, "stays in all-clusters view");
     assert!(matches!(app.mode, Mode::UserPicker(_))); // 2 logins -> pick user
     match app.on_key(KeyEvent::from(KeyCode::Enter)) {
         Outcome::Run { args, .. } => {
@@ -1143,16 +1154,18 @@ fn entering_all_clusters_reuses_active_cluster_data() {
     app.on_key(press('c'));
     app.on_key(KeyEvent::from(KeyCode::Up));
     app.on_key(KeyEvent::from(KeyCode::Enter));
-    assert!(app.aggregate);
+    assert!(app.agg.enabled);
     // Both clusters render (root reused from scoped cache + leaf fetched)...
-    assert_eq!(app.agg_rows.len(), 2);
+    assert_eq!(app.agg.rows.len(), 2);
     assert!(
-        app.agg_rows
+        app.agg
+            .rows
             .iter()
             .any(|r| r.cluster.as_str() == "root.example")
     );
     assert!(
-        app.agg_rows
+        app.agg
+            .rows
             .iter()
             .any(|r| r.cluster.as_str() == "leaf.example")
     );

@@ -55,7 +55,7 @@ mod model;
 mod nav;
 mod update;
 use dispatch::{Dispatcher, Job, JobResult, Lane, agg_rows_of, err_row};
-use listings::{Listings, PickList};
+use listings::{AggView, Listings, PickList};
 // Re-exported so the rest of the crate keeps using `crate::app::Tab` etc., and so
 // the sibling child modules' `use super::*` still resolves the model types.
 pub(crate) use model::*;
@@ -123,17 +123,8 @@ pub(crate) struct App {
     prefs_store: Box<dyn PreferencesStore>,
     /// In-progress Settings (persisted defaults) editor.
     pub(crate) settings_form: SettingsForm,
-    /// All-clusters aggregate view: when on, the active tab lists every cluster.
-    pub(crate) aggregate: bool,
-    pub(crate) agg_rows: Vec<AggRow>,
-    agg_seq: u64,
-    agg_pending: usize,
-    /// Per-`(tab, cluster)` cache of an all-clusters fan-out: each cluster's rows
-    /// are cached independently as they arrive, so **partial** progress survives
-    /// navigating away - on return, cached clusters render instantly and only the
-    /// missing ones are re-fetched (no restart from zero). Cleared per-cluster on
-    /// login, per-tab on `r`, and wholesale on topology change / logout.
-    agg_cache: HashMap<(Tab, ClusterName), Vec<AggRow>>,
+    /// All-clusters aggregate view state.
+    pub(crate) agg: AggView,
     /// Set when an all-clusters admin login (`L` on a login-required row) just
     /// switched the active profile to a leaf. The next [`Self::after_action`]
     /// re-selects this (root) proxy *before* refetching clusters/status, so the
@@ -233,13 +224,9 @@ impl App {
             prefs,
             prefs_store,
             settings_form: SettingsForm::default(),
-            aggregate: false,
+            agg: AggView::default(),
             pending_root_restore: None,
             relogin_root: None,
-            agg_rows: Vec::new(),
-            agg_seq: 0,
-            agg_pending: 0,
-            agg_cache: HashMap::new(),
             admin_allowed: false,
             admin_probed: false,
             scp_form: ScpForm::default(),

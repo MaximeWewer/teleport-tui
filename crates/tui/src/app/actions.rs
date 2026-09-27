@@ -62,11 +62,11 @@ impl App {
     /// The proxy of the highlighted serial-aggregate row, but only when that row
     /// is a `login_required` placeholder (so `L` knows to target it).
     fn pending_login_cluster(&self) -> Option<String> {
-        if !(self.aggregate && self.tab.serial_aggregation()) {
+        if !(self.agg.enabled && self.tab.serial_aggregation()) {
             return None;
         }
         let idx = self.selected_index()?;
-        let row = self.agg_rows.get(idx)?;
+        let row = self.agg.rows.get(idx)?;
         row.login_required.then(|| row.cluster.to_string())
     }
 
@@ -162,7 +162,8 @@ impl App {
         if let Some(root) = self.relogin_root.take() {
             self.pending_root_restore = Some(root);
             let proxy = f.proxy.clone();
-            self.agg_cache
+            self.agg
+                .cache
                 .retain(|(_, cluster), _| cluster.as_str() != proxy);
         }
         let args = cmd::login(proxy.as_ref(), user.as_ref(), f.auth.as_ref(), f.mfa);
@@ -404,7 +405,7 @@ impl App {
             return None;
         }
         let idx = self.selected_index()?;
-        let (cluster, host) = if self.aggregate {
+        let (cluster, host) = if self.agg.enabled {
             self.agg_target::<Hostname>(idx)?
         } else {
             let host = self.lists.nodes.get(idx)?.hostname.clone();
@@ -423,11 +424,11 @@ impl App {
         if self.tab == Tab::Recordings {
             // The sid comes from the aggregate row in all-clusters mode (recorded
             // on the row, not a visible column) or the scoped list otherwise.
-            let sid = if self.aggregate {
+            let sid = if self.agg.enabled {
                 if !self.agg_row_actionable(idx) {
                     return Outcome::Continue;
                 }
-                self.agg_rows.get(idx).and_then(|r| r.sid.clone())
+                self.agg.rows.get(idx).and_then(|r| r.sid.clone())
             } else {
                 self.lists.recordings.get(idx).map(|r| r.sid.clone())
             };
@@ -461,7 +462,7 @@ impl App {
     fn show_detail(&mut self, idx: usize) -> Outcome {
         let title = format!("{} detail", self.tab.title());
         let rows = if self.aggregating() {
-            let Some(r) = self.agg_rows.get(idx) else {
+            let Some(r) = self.agg.rows.get(idx) else {
                 return Outcome::Continue;
             };
             let mut rows = vec![("CLUSTER".to_owned(), vec![r.cluster.to_string()])];
@@ -756,7 +757,7 @@ impl App {
         if !self.agg_row_actionable(idx) {
             return None;
         }
-        let r = self.agg_rows.get(idx)?;
+        let r = self.agg.rows.get(idx)?;
         let parsed = T::try_from(r.cells.first()?.as_str());
         let cluster = r.cluster.clone();
         match parsed {
@@ -772,7 +773,7 @@ impl App {
     /// cluster's listing error or "not logged in") is not: acting on it would
     /// hand its message text to `tsh` as a name, so say why nothing happens.
     fn agg_row_actionable(&mut self, idx: usize) -> bool {
-        let Some(r) = self.agg_rows.get(idx).filter(|r| r.is_placeholder()) else {
+        let Some(r) = self.agg.rows.get(idx).filter(|r| r.is_placeholder()) else {
             return true;
         };
         let msg = if r.login_required {
@@ -908,7 +909,8 @@ impl App {
                 .iter()
                 .position(|c| *c == "STATE")?;
             let pending = self
-                .agg_rows
+                .agg
+                .rows
                 .get(idx)
                 .and_then(|r| r.cells.get(state_col))
                 .is_some_and(|s| s == RequestState::Pending.label());

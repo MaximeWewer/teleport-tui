@@ -19,13 +19,13 @@ impl App {
         self.mfa_devices.clear();
         self.mode = Mode::Normal;
         self.sessions.clear();
-        self.agg_rows.clear();
-        self.agg_cache.clear();
+        self.agg.rows.clear();
+        self.agg.cache.clear();
         self.cache_key.clear();
         self.topology = None;
         self.admin_allowed = false;
-        self.aggregate = false;
-        self.agg_seq += 1; // drop any in-flight aggregate fan-out from the old session
+        self.agg.enabled = false;
+        self.agg.seq += 1; // drop any in-flight aggregate fan-out from the old session
         self.tab = Tab::Ssh;
         self.loading = false;
         self.recompute_visible();
@@ -34,7 +34,7 @@ impl App {
     /// True when the active view is the all-clusters aggregate (every tab
     /// aggregates in this mode).
     pub(crate) fn aggregating(&self) -> bool {
-        self.aggregate
+        self.agg.enabled
     }
 
     pub(super) fn selected_index(&self) -> Option<usize> {
@@ -126,9 +126,9 @@ impl App {
         self.table.select(None);
         // Show cached data instantly on a hit; only fetch (like `r`) on a miss.
         // In all-clusters mode every tab is aggregated and served from
-        // `agg_cache` inside the dispatch_aggregate* helpers, not the scoped
+        // `agg.cache` inside the dispatch_aggregate* helpers, not the scoped
         // `cache_key`.
-        let aggregated = self.aggregate;
+        let aggregated = self.agg.enabled;
         if !aggregated && self.cache_key.get(&tab) == Some(&self.desired_key(tab)) {
             self.loading = false;
             self.recompute_visible();
@@ -183,15 +183,15 @@ impl App {
         self.mode = Mode::Normal;
         if sel == 0 {
             // "All clusters" → aggregate view.
-            self.aggregate = true;
+            self.agg.enabled = true;
             self.reload_active();
             return;
         }
         // A real cluster (index offset by the "All" entry) → scoped view.
         // Invalidate any in-flight aggregate fan-out so a late leaf can't clobber
         // the loading flag/status of the scoped fetch we're about to start.
-        self.aggregate = false;
-        self.agg_seq += 1;
+        self.agg.enabled = false;
+        self.agg.seq += 1;
         let name = self
             .topology
             .as_ref()

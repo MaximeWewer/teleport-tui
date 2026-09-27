@@ -80,7 +80,7 @@ pub(super) fn render_status(frame: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::Cyan),
         ));
         spans.push(Span::raw("  ▸  "));
-        if app.aggregate {
+        if app.agg.enabled {
             spans.push(Span::styled(
                 "★ ALL CLUSTERS",
                 Style::default()

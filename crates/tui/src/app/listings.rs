@@ -1,16 +1,20 @@
 //! The per-tab resource listings [`super::App`] holds for the scoped view: one
 //! typed vec per tab, plus the generic row/search/count views the update loop
 //! needs, so the Tab -> vec mapping lives here instead of in every caller.
-//! Also [`PickList`], the items + selection pair behind every popup list.
+//! Also [`PickList`], the items + selection pair behind every popup list, and
+//! [`AggView`], the all-clusters view's rows and fan-out bookkeeping.
+
+use std::collections::HashMap;
 
 use domain::admin::{AdminRole, AdminUser, Bot, Instance, ProvisionToken};
 use domain::node::SshNode;
 use domain::recording::SessionRecording;
 use domain::request::AccessRequest;
 use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
+use domain::value::ClusterName;
 
 use super::dispatch::Listing;
-use super::{Tab, clamp_step};
+use super::{AggRow, Tab, clamp_step};
 
 /// The last loaded listing of every tab (empty until loaded).
 #[derive(Debug, Default)]
@@ -187,4 +191,23 @@ impl<T> PickList<T> {
         self.clamp();
         removed
     }
+}
+
+/// The all-clusters aggregate view: its rows plus the bookkeeping of the
+/// per-cluster fan-out that fills them.
+#[derive(Debug, Default)]
+pub(crate) struct AggView {
+    /// When on, the active tab lists every cluster.
+    pub(crate) enabled: bool,
+    pub(crate) rows: Vec<AggRow>,
+    /// Generation of the current fan-out: slices of an older one are dropped.
+    pub(crate) seq: u64,
+    /// Clusters of the current fan-out that have not reported yet.
+    pub(crate) pending: usize,
+    /// Per-`(tab, cluster)` cache of an all-clusters fan-out: each cluster's rows
+    /// are cached independently as they arrive, so **partial** progress survives
+    /// navigating away - on return, cached clusters render instantly and only the
+    /// missing ones are re-fetched (no restart from zero). Cleared per-cluster on
+    /// login, per-tab on `r`, and wholesale on topology change / logout.
+    pub(crate) cache: HashMap<(Tab, ClusterName), Vec<AggRow>>,
 }

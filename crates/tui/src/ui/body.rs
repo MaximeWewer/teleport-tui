@@ -233,7 +233,7 @@ fn render_aggregate(frame: &mut Frame, app: &mut App, area: Rect) {
         app.tab.title(),
         app.visible.len()
     );
-    let (visible, agg_rows) = (&app.visible, &app.agg_rows);
+    let (visible, agg_rows) = (&app.visible, &app.agg.rows);
     render_windowed(frame, area, visible.len(), &mut app.table, |window| {
         // Only the on-screen rows, borrowing their cells rather than cloning.
         let rows: Vec<Row> = visible
