@@ -17,6 +17,7 @@
 mod app;
 mod forms;
 mod proxy;
+mod signals;
 mod ssh;
 mod ui;
 
@@ -126,6 +127,9 @@ fn real_main() -> Result<(), String> {
     application.bootstrap();
 
     let refresh = config.refresh_seconds.map(Duration::from_secs);
+    // Before the terminal is taken over: from here on SIGHUP/SIGTERM/SIGINT only
+    // raise a flag the event loop polls, so shutdown always goes through Drop.
+    signals::install().map_err(|e| e.to_string())?;
 
     let _guard = TerminalGuard::enter().map_err(|e| e.to_string())?;
     let backend = CrosstermBackend::new(io::stdout());
@@ -140,6 +144,12 @@ fn run(terminal: &mut Tui, app: &mut App, refresh: Option<Duration>) -> io::Resu
     // cycle - saves the ~8 idle redraws/sec the 120ms poll would otherwise force.
     let mut dirty = true;
     loop {
+        // SIGHUP (terminal closed) / SIGTERM / SIGINT: return normally, so the
+        // `App` drop stops every background proxy/forward and the guard restores
+        // the terminal, rather than dying and orphaning the tunnels.
+        if signals::shutdown_requested() {
+            return Ok(());
+        }
         // Apply any finished background jobs and animate the spinner.
         if app.tick() {
             dirty = true;

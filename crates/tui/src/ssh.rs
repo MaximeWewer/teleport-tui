@@ -4,7 +4,8 @@
 
 use std::io::{self, Stdout, Write};
 use std::path::Path;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::thread::sleep;
 use std::time::Duration;
 
 use ratatui::Terminal;
@@ -97,11 +98,15 @@ pub(crate) fn run_interactive(
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    let spawn = cmd.status();
+    let spawn = cmd.spawn().and_then(|mut child| wait_child(&mut child));
+    // A Ctrl-C typed during the session reached the child (it shares our
+    // foreground process group); it was not a request to quit the TUI.
+    crate::signals::clear_interrupt();
 
     // A one-off command exits on its own: pause on its output so the user can read
     // it before we wipe the screen. Raw mode lets a single keypress dismiss it.
-    if pause_on_exit {
+    // Skipped when shutting down on SIGHUP/SIGTERM.
+    if pause_on_exit && !crate::signals::terminate_requested() {
         enable_raw_mode()?;
         let note = match spawn.as_ref().ok().and_then(ExitStatus::code) {
             Some(0) => "ok".to_owned(),
@@ -136,11 +141,32 @@ pub(crate) fn run_interactive(
     spawn
 }
 
-/// Block until the user presses a key (any key). Used to pause on a finished
-/// one-off command's output. Assumes raw mode is on (single keypress, no Enter).
+/// Wait for a handed-off child. Polls rather than blocking in `wait()` so that a
+/// SIGHUP/SIGTERM received meanwhile (our handler only raises a flag) stops the
+/// child and lets the TUI shut down instead of hanging on it.
+fn wait_child(child: &mut Child) -> io::Result<ExitStatus> {
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if crate::signals::terminate_requested() {
+            let _ = child.kill();
+            return child.wait();
+        }
+        sleep(Duration::from_millis(50));
+    }
+}
+
+/// Block until the user presses a key (any key), or a SIGHUP/SIGTERM arrives.
+/// Used to pause on a finished one-off command's output. Assumes raw mode is on
+/// (single keypress, no Enter).
 fn wait_any_key() -> io::Result<()> {
     loop {
-        if let Event::Key(k) = event::read()?
+        if crate::signals::terminate_requested() {
+            return Ok(());
+        }
+        if event::poll(Duration::from_millis(120))?
+            && let Event::Key(k) = event::read()?
             && k.kind == KeyEventKind::Press
         {
             return Ok(());
@@ -198,6 +224,11 @@ pub(crate) fn play_recording(
     let status = loop {
         if let Some(st) = child.try_wait()? {
             break Some(st); // finished on its own
+        }
+        if crate::signals::terminate_requested() {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None; // SIGHUP/SIGTERM: the TUI is shutting down
         }
         if event::poll(Duration::from_millis(80))?
             && let Event::Key(k) = event::read()?

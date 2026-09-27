@@ -1321,6 +1321,7 @@ dependencies = [
  "infrastructure",
  "ratatui",
  "rustix",
+ "signal-hook",
  "zeroize",
 ]
 
