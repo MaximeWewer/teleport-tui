@@ -134,8 +134,8 @@ fn run_job(repos: &Repositories, job: Job) -> JobResult {
 }
 
 /// One cluster's rows for an all-clusters admin fan-out. `tctl` targets the
-/// currently logged-in proxy, so the caller re-selects `ctx` (`select_cluster`)
-/// - which is why the fan-out runs serially on one thread, not the concurrent
+/// currently logged-in proxy, so the caller re-selects `ctx` (`select_cluster`),
+/// which is why the fan-out runs serially on one thread, not the concurrent
 /// per-cluster jobs used for cluster-scoped tabs (a parallel profile switch would
 /// race). A cluster without a live session yields a single `login_required`
 /// placeholder instead of erroring.
