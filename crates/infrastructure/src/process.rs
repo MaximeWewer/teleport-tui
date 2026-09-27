@@ -126,10 +126,20 @@ fn run_with_timeout(req: &CommandRequest, timeout: Duration) -> std::io::Result<
 
     // The readers finish at EOF, i.e. once every holder of the pipes' write end
     // is gone. That is normally the command itself, but a helper it forked may
-    // outlive it with the pipes inherited: wait for it until the deadline, then
-    // kill the group. Never block unbounded on a reader - if one is still stuck
-    // (a helper escaped the group) it is abandoned rather than hanging the worker.
-    let (stdout, stderr) = match (recv_until(&out_rx, deadline), recv_until(&err_rx, deadline)) {
+    // outlive it with the pipes inherited. Once the command has exited, give
+    // such a helper only a short grace (not the rest of the timeout) to close
+    // them, then kill the group and keep the output. Never block unbounded on a
+    // reader - if one is still stuck (a helper escaped the group) it is
+    // abandoned rather than hanging the worker.
+    let readers_deadline = if status.is_ok() {
+        deadline.min(Instant::now() + EXIT_GRACE)
+    } else {
+        deadline
+    };
+    let (stdout, stderr) = match (
+        recv_until(&out_rx, readers_deadline),
+        recv_until(&err_rx, readers_deadline),
+    ) {
         (Some(out), Some(err)) => (out, err),
         (out, err) => {
             kill_tree(&mut child);
@@ -156,6 +166,10 @@ fn run_with_timeout(req: &CommandRequest, timeout: Duration) -> std::io::Result<
         stderr: String::from_utf8_lossy(&stderr).into_owned(),
     })
 }
+
+/// How long a command that has exited may leave its output pipes open (held
+/// by a forked helper) before the process group is killed.
+const EXIT_GRACE: Duration = Duration::from_secs(2);
 
 /// How long to wait for the output readers after killing the process group.
 const READER_GRACE: Duration = Duration::from_secs(2);
@@ -225,6 +239,22 @@ mod tests {
         assert!(out.succeeded());
         assert_eq!(out.stdout, "hi\n");
         assert!(started.elapsed() < Duration::from_secs(10), "must not hang");
+    }
+
+    #[test]
+    fn helper_holding_the_pipes_does_not_wait_for_the_full_timeout() {
+        // The command exits at once but its helper keeps the pipes: we must
+        // return after the short exit grace, not the (long) command timeout.
+        let started = Instant::now();
+        let out = run_with_timeout(&sh("echo hi; sleep 100 &"), Duration::from_secs(60))
+            .expect("the command itself succeeded");
+        assert!(out.succeeded());
+        assert_eq!(out.stdout, "hi\n");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "waited {:?}",
+            started.elapsed()
+        );
     }
 
     #[test]
