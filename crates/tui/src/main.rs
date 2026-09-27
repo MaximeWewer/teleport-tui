@@ -123,7 +123,7 @@ fn real_main() -> Result<(), String> {
         login_proxy: config.proxy.clone(),
         login_user: config.user.clone(),
         login_auth: config.auth.clone(),
-        login_mfa: config.mfa.clone(),
+        login_mfa: config.mfa,
         default_login: config.default_login.clone(),
         default_kube_user: config.kube_user.clone(),
         default_db_user: config.db_user.clone(),

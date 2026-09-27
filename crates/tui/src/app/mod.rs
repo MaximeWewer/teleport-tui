@@ -16,6 +16,7 @@ use application::use_case::{
 use domain::admin::{
     AdminRole, AdminUser, Bot, GeneratedToken, Instance, InviteLink, ProvisionToken,
 };
+use domain::auth::{AuthMethod, MfaMode};
 use domain::capability::Capabilities;
 use domain::cluster::{ClusterContext, ClusterTopology};
 use domain::error::{DomainError, ReportableError};
@@ -43,9 +44,9 @@ use ratatui::widgets::{ListState, TableState};
 use zeroize::Zeroizing;
 
 use crate::forms::{
-    AUTH_OPTIONS, AddUserForm, KubeExecForm, LoginForm, MFA_OPTIONS, NodeTarget, ScpForm,
-    SettingsForm, SshOptionsForm, forward_binds_all_interfaces, opt_index, parse_field,
-    parse_opt_field, valid_command, valid_forward, valid_path,
+    AddUserForm, KubeExecForm, LoginForm, NodeTarget, ScpForm, SettingsForm, SshOptionsForm,
+    forward_binds_all_interfaces, parse_field, parse_opt_field, valid_command, valid_forward,
+    valid_path,
 };
 
 mod actions;
@@ -138,8 +139,8 @@ pub(crate) struct App {
     login_proxy: Option<String>,
     login_user: Option<String>,
     /// Persisted login-form defaults (auth connector / MFA mode).
-    login_auth: Option<String>,
-    login_mfa: Option<String>,
+    login_auth: Option<AuthMethod>,
+    login_mfa: Option<MfaMode>,
     /// Persisted default users that skip the per-resource pickers/prompts.
     default_login: Option<String>,
     default_kube_user: Option<String>,

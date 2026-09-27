@@ -15,6 +15,7 @@
 )]
 
 pub mod admin;
+pub mod auth;
 pub mod capability;
 pub mod cluster;
 pub mod error;

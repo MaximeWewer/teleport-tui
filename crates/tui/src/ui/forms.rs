@@ -102,7 +102,7 @@ pub(super) fn render_login_form(frame: &mut Frame, app: &App) {
             "MFA mode",
             or_default(f.mfa_str()),
             true,
-            "←/→ choose · otp typed · platform=TPM · webauthn/sso/browser",
+            "←/→ choose · otp typed · platform=TPM · cross-platform=key · sso/browser",
         ),
     ];
     let lines = form_lines(

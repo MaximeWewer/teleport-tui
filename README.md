@@ -174,8 +174,8 @@ kube_tools = "shell,k9s"
 # Login-form defaults
 proxy = "root.example.com"
 user  = "alice"
-auth  = "local"   # "" | local | passwordless | sso
-mfa   = "otp"     # "" | otp | webauthn | platform | sso | browser
+auth  = "local"   # "" | local | passwordless | sso | <connector name>
+mfa   = "otp"     # "" | otp | cross-platform | platform | sso | browser | auto
 ```
 
 ## Logs

@@ -31,14 +31,12 @@ impl App {
             .filter(|s| !s.is_empty())
             .or_else(|| self.login_user.clone())
             .unwrap_or_default();
-        // Seed the dropdowns from the persisted defaults (blank → first slot).
-        let auth = opt_index(AUTH_OPTIONS, self.login_auth.as_deref().unwrap_or(""));
-        let mfa = opt_index(MFA_OPTIONS, self.login_mfa.as_deref().unwrap_or(""));
+        // Seed the dropdowns from the persisted defaults.
         self.login_form = LoginForm {
             proxy,
             user,
-            auth,
-            mfa,
+            auth: self.login_auth.clone(),
+            mfa: self.login_mfa,
             field: 0,
         };
         self.mode = Mode::LoginForm;
@@ -80,8 +78,8 @@ impl App {
             db_user: self.default_db_user.clone().unwrap_or_default(),
             proxy: self.login_proxy.clone().unwrap_or_default(),
             user: self.login_user.clone().unwrap_or_default(),
-            auth: opt_index(AUTH_OPTIONS, self.login_auth.as_deref().unwrap_or("")),
-            mfa: opt_index(MFA_OPTIONS, self.login_mfa.as_deref().unwrap_or("")),
+            auth: self.login_auth.clone(),
+            mfa: self.login_mfa,
             refresh: self
                 .refresh_seconds
                 .map(|n| n.to_string())
@@ -113,8 +111,8 @@ impl App {
         self.default_db_user = opt(&f.db_user);
         self.login_proxy = opt(&f.proxy);
         self.login_user = opt(&f.user);
-        self.login_auth = opt(f.auth_str());
-        self.login_mfa = opt(f.mfa_str());
+        self.login_auth = f.auth;
+        self.login_mfa = f.mfa;
         self.refresh_seconds = f.refresh.trim().parse::<u64>().ok().filter(|n| *n > 0);
         let tools: Vec<String> = f
             .kube_tools
@@ -177,9 +175,7 @@ impl App {
             self.agg_cache
                 .retain(|(_, cluster), _| cluster.as_str() != proxy);
         }
-        let auth = f.auth_str();
-        let mfa = f.mfa_str();
-        let args = cmd::login(proxy.as_ref(), user.as_ref(), auth, mfa);
+        let args = cmd::login(proxy.as_ref(), user.as_ref(), f.auth.as_ref(), f.mfa);
         let target = if f.proxy.is_empty() {
             "Teleport".to_owned()
         } else {
@@ -187,7 +183,7 @@ impl App {
         };
         // `local` is the only flow where tsh prompts for a typed password; the
         // others (sso/passwordless) drive the browser, TPM, or a security key.
-        let hint = if auth == "local" || auth.is_empty() {
+        let hint = if matches!(f.auth, None | Some(AuthMethod::Local)) {
             " (tsh will prompt for password/MFA in the terminal)"
         } else {
             ""

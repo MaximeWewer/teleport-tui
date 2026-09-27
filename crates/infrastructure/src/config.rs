@@ -6,6 +6,8 @@
 
 use std::path::{Path, PathBuf};
 
+use domain::auth::{AuthMethod, MfaMode};
+
 use crate::platform;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -24,10 +26,11 @@ pub struct Config {
     pub proxy: Option<String>,
     /// Pre-filled Teleport user for the login form (`tsh login --user`).
     pub user: Option<String>,
-    /// Pre-filled auth connector for the login form (`local`/`passwordless`/`sso`).
-    pub auth: Option<String>,
-    /// Pre-filled MFA mode for the login form (`otp`/`webauthn`/`platform`/…).
-    pub mfa: Option<String>,
+    /// Pre-filled auth method for the login form (`local`/`passwordless`/`sso`
+    /// or a connector name).
+    pub auth: Option<AuthMethod>,
+    /// Pre-filled MFA mode for the login form (`otp`/`cross-platform`/…).
+    pub mfa: Option<MfaMode>,
     /// Default SSH login. When set, connecting to a node uses it directly
     /// instead of prompting (`tsh ssh <login>@host`).
     pub default_login: Option<String>,
@@ -124,8 +127,18 @@ impl Config {
                 }
                 "proxy" if !value.is_empty() => cfg.proxy = Some(value.to_owned()),
                 "user" if !value.is_empty() => cfg.user = Some(value.to_owned()),
-                "auth" if !value.is_empty() => cfg.auth = Some(value.to_owned()),
-                "mfa" if !value.is_empty() => cfg.mfa = Some(value.to_owned()),
+                "auth" if !value.is_empty() => match AuthMethod::try_from(value) {
+                    Ok(a) => cfg.auth = Some(a),
+                    Err(_) => warnings.push(format!(
+                        "config line {lineno}: invalid auth `{value}` (expected local, passwordless, sso or a connector name), using the cluster default"
+                    )),
+                },
+                "mfa" if !value.is_empty() => match MfaMode::try_from(value) {
+                    Ok(m) => cfg.mfa = Some(m),
+                    Err(_) => warnings.push(format!(
+                        "config line {lineno}: invalid mfa `{value}` (expected one of auto, cross-platform, platform, otp, sso, browser), using the tsh default"
+                    )),
+                },
                 "default_login" if !value.is_empty() => {
                     cfg.default_login = Some(value.to_owned());
                 }
@@ -172,10 +185,10 @@ impl Config {
             kv(&mut s, "user", v);
         }
         if let Some(v) = &self.auth {
-            kv(&mut s, "auth", v);
+            kv(&mut s, "auth", v.as_str());
         }
-        if let Some(v) = &self.mfa {
-            kv(&mut s, "mfa", v);
+        if let Some(v) = self.mfa {
+            kv(&mut s, "mfa", v.as_str());
         }
         if let Some(v) = &self.default_login {
             kv(&mut s, "default_login", v);
@@ -279,8 +292,8 @@ mod tests {
             kube_tools: vec!["shell".to_owned(), "k9s".to_owned()],
             proxy: Some("root.example".to_owned()),
             user: Some("maxime".to_owned()),
-            auth: Some("local".to_owned()),
-            mfa: Some("otp".to_owned()),
+            auth: Some(AuthMethod::Local),
+            mfa: Some(MfaMode::Otp),
             default_login: Some("root".to_owned()),
             kube_user: Some("kube-admin".to_owned()),
             db_user: Some("readonly".to_owned()),
@@ -297,8 +310,23 @@ mod tests {
         assert_eq!(cfg.default_login.as_deref(), Some("root"));
         assert_eq!(cfg.kube_user.as_deref(), Some("ka"));
         assert_eq!(cfg.db_user.as_deref(), Some("ro"));
-        assert_eq!(cfg.auth.as_deref(), Some("sso"));
-        assert_eq!(cfg.mfa.as_deref(), Some("otp"));
+        assert_eq!(cfg.auth, Some(AuthMethod::Sso));
+        assert_eq!(cfg.mfa, Some(MfaMode::Otp));
+    }
+
+    #[test]
+    fn warns_about_invalid_auth_and_mfa() {
+        let (cfg, warnings) = Config::parse_with_warnings("auth = \"-evil\"\nmfa = \"yubikey\"\n");
+        assert_eq!(cfg.auth, None);
+        assert_eq!(cfg.mfa, None);
+        assert_eq!(warnings.len(), 2, "{warnings:?}");
+        assert!(warnings[0].contains("auth"));
+        assert!(warnings[1].contains("yubikey"));
+        // A named connector and the legacy `webauthn` spelling are accepted.
+        let (cfg, warnings) = Config::parse_with_warnings("auth = \"okta\"\nmfa = \"webauthn\"\n");
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(cfg.auth.as_ref().map(AuthMethod::as_str), Some("okta"));
+        assert_eq!(cfg.mfa, Some(MfaMode::CrossPlatform));
     }
 
     #[test]

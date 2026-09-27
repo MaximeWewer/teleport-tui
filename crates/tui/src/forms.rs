@@ -8,27 +8,20 @@
 //! focused-text accessor (`text_mut`). Pulling them out of `app` keeps the form
 //! plumbing separate from the update/dispatch logic.
 
+use domain::auth::{AuthMethod, MfaMode};
 use domain::error::DomainError;
 use domain::value::{ClusterName, Hostname};
 
-/// Auth connector choices for the login dropdown. `""` = let `tsh` use the
-/// cluster default. `sso` triggers the browser flow (no `--auth` connector);
-/// `local`/`passwordless` are passed through as `--auth=<value>`.
-pub(crate) const AUTH_OPTIONS: &[&str] = &["", "local", "passwordless", "sso"];
-/// MFA mode choices for the login dropdown. `""` = `tsh` default (auto).
-/// `platform` uses the machine TPM; `otp` is typed in the terminal; `sso`/
-/// `browser` open the browser; `webauthn` covers security keys (e.g. a Yubikey).
-pub(crate) const MFA_OPTIONS: &[&str] = &["", "otp", "webauthn", "platform", "sso", "browser"];
-
 /// Editable `tsh login` form. The password and MFA are NOT handled here - `tsh`
 /// prompts for them in the handed-over terminal (so secrets never enter the TUI).
-/// `auth`/`mfa` are indices into [`AUTH_OPTIONS`]/[`MFA_OPTIONS`] (dropdowns).
+/// `auth`/`mfa` are dropdowns over [`AuthMethod::CHOICES`]/[`MfaMode::CHOICES`];
+/// `None` lets `tsh` use its default.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LoginForm {
     pub(crate) proxy: String,
     pub(crate) user: String,
-    pub(crate) auth: usize,
-    pub(crate) mfa: usize,
+    pub(crate) auth: Option<AuthMethod>,
+    pub(crate) mfa: Option<MfaMode>,
     pub(crate) field: usize,
 }
 
@@ -55,20 +48,21 @@ impl LoginForm {
 
     /// Cycle the focused dropdown (auth/mfa). No-op on the text fields.
     pub(crate) fn cycle(&mut self, forward: bool) {
-        let (idx, len) = match self.field {
-            2 => (&mut self.auth, AUTH_OPTIONS.len()),
-            3 => (&mut self.mfa, MFA_OPTIONS.len()),
-            _ => return,
-        };
-        *idx = wrap_step(*idx, len, forward);
+        match self.field {
+            2 => self.auth = cycle_choice(self.auth.as_ref(), &AuthMethod::CHOICES, forward),
+            3 => self.mfa = cycle_choice(self.mfa.as_ref(), &MfaMode::CHOICES, forward),
+            _ => {}
+        }
     }
 
-    pub(crate) fn auth_str(&self) -> &'static str {
-        AUTH_OPTIONS.get(self.auth).copied().unwrap_or("")
+    /// The auth dropdown's label (`""` = default).
+    pub(crate) fn auth_str(&self) -> &str {
+        self.auth.as_ref().map_or("", AuthMethod::as_str)
     }
 
+    /// The MFA dropdown's label (`""` = default).
     pub(crate) fn mfa_str(&self) -> &'static str {
-        MFA_OPTIONS.get(self.mfa).copied().unwrap_or("")
+        self.mfa.map_or("", MfaMode::as_str)
     }
 }
 
@@ -128,9 +122,19 @@ impl ScpForm {
     }
 }
 
-/// Index of `val` in `opts`, or 0 (the `""`/default slot) when absent.
-pub(crate) fn opt_index(opts: &[&str], val: &str) -> usize {
-    opts.iter().position(|o| *o == val).unwrap_or(0)
+/// Step an optional dropdown value through `None` (the default slot) then
+/// `choices`, wrapping. A current value outside `choices` (e.g. a connector name
+/// from the config file) steps as if from the default slot.
+fn cycle_choice<T: Clone + PartialEq>(
+    current: Option<&T>,
+    choices: &[T],
+    forward: bool,
+) -> Option<T> {
+    let pos = current
+        .and_then(|c| choices.iter().position(|o| o == c))
+        .map_or(0, |i| i + 1);
+    let next = wrap_step(pos, choices.len() + 1, forward);
+    next.checked_sub(1).and_then(|i| choices.get(i).cloned())
 }
 
 /// Advance a wrapping cursor (form field, dropdown option) by ±1 within
@@ -147,7 +151,7 @@ fn wrap_step(idx: usize, len: usize, forward: bool) -> usize {
 }
 
 /// Editable, persistable defaults shown on the Settings screen. Text rows are
-/// typed; auth/mfa are dropdowns (indices into [`AUTH_OPTIONS`]/[`MFA_OPTIONS`]).
+/// typed; auth/mfa are dropdowns (as on [`LoginForm`]).
 #[derive(Debug, Default, Clone)]
 pub(crate) struct SettingsForm {
     pub(crate) ssh_login: String,
@@ -155,8 +159,8 @@ pub(crate) struct SettingsForm {
     pub(crate) db_user: String,
     pub(crate) proxy: String,
     pub(crate) user: String,
-    pub(crate) auth: usize,
-    pub(crate) mfa: usize,
+    pub(crate) auth: Option<AuthMethod>,
+    pub(crate) mfa: Option<MfaMode>,
     pub(crate) refresh: String,
     pub(crate) kube_tools: String,
     pub(crate) field: usize,
@@ -193,20 +197,19 @@ impl SettingsForm {
     }
 
     pub(crate) fn cycle(&mut self, forward: bool) {
-        let (idx, len) = match self.field {
-            5 => (&mut self.auth, AUTH_OPTIONS.len()),
-            6 => (&mut self.mfa, MFA_OPTIONS.len()),
-            _ => return,
-        };
-        *idx = wrap_step(*idx, len, forward);
+        match self.field {
+            5 => self.auth = cycle_choice(self.auth.as_ref(), &AuthMethod::CHOICES, forward),
+            6 => self.mfa = cycle_choice(self.mfa.as_ref(), &MfaMode::CHOICES, forward),
+            _ => {}
+        }
     }
 
-    pub(crate) fn auth_str(&self) -> &'static str {
-        AUTH_OPTIONS.get(self.auth).copied().unwrap_or("")
+    pub(crate) fn auth_str(&self) -> &str {
+        self.auth.as_ref().map_or("", AuthMethod::as_str)
     }
 
     pub(crate) fn mfa_str(&self) -> &'static str {
-        MFA_OPTIONS.get(self.mfa).copied().unwrap_or("")
+        self.mfa.map_or("", MfaMode::as_str)
     }
 }
 
@@ -381,4 +384,29 @@ pub(crate) fn valid_path(path: &str) -> bool {
         && path.len() <= 4096
         && !path.starts_with('-')
         && !path.chars().any(char::is_control)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropdown_cycles_through_default_and_choices() {
+        let mut f = LoginForm {
+            field: 3,
+            ..LoginForm::default()
+        };
+        f.cycle(true);
+        assert_eq!(f.mfa, Some(MfaMode::Otp));
+        f.cycle(false);
+        assert_eq!(f.mfa, None);
+        f.cycle(false); // wraps to the last choice
+        assert_eq!(f.mfa, MfaMode::CHOICES.last().copied());
+        // A config-only connector is kept until cycled, then steps like default.
+        f.field = 2;
+        f.auth = Some(AuthMethod::try_from("okta").unwrap());
+        assert_eq!(f.auth_str(), "okta");
+        f.cycle(true);
+        assert_eq!(f.auth, Some(AuthMethod::Local));
+    }
 }

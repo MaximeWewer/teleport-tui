@@ -18,21 +18,21 @@
 //! validation, only assembly. Value-bearing flags use the `--flag=value` form so
 //! a value can never be reparsed as a separate option.
 
+use domain::auth::{AuthMethod, MfaMode};
 use domain::value::{
     ClusterName, DeviceName, Hostname, Identifier, Login, RequestId, ResourceName, RoleList,
     SessionId,
 };
 
 /// `tsh login [--proxy=…] [--user=…] [--auth=…] [--mfa-mode=…]`. An absent
-/// `proxy`/`user` or an empty `mfa` omits its flag. `auth` is only emitted for the real
-/// connector flows (`local`/`passwordless`); `sso` drives the browser and takes
-/// no `--auth` value, so it (and any other value) is dropped.
+/// option omits its flag, as does [`AuthMethod::Sso`] (the default SSO flow
+/// drives the browser and takes no `--auth` value).
 #[must_use]
 pub fn login(
     proxy: Option<&Identifier>,
     user: Option<&Identifier>,
-    auth: &str,
-    mfa: &str,
+    auth: Option<&AuthMethod>,
+    mfa: Option<MfaMode>,
 ) -> Vec<String> {
     let mut args = vec!["login".to_owned()];
     if let Some(proxy) = proxy {
@@ -41,10 +41,10 @@ pub fn login(
     if let Some(user) = user {
         args.push(format!("--user={user}"));
     }
-    if auth == "local" || auth == "passwordless" {
+    if let Some(auth) = auth.and_then(AuthMethod::flag_value) {
         args.push(format!("--auth={auth}"));
     }
-    if !mfa.is_empty() {
+    if let Some(mfa) = mfa {
         args.push(format!("--mfa-mode={mfa}"));
     }
     args
@@ -343,13 +343,13 @@ mod tests {
 
     #[test]
     fn login_omits_empty_and_drops_sso_connector() {
-        assert_eq!(login(None, None, "", ""), vec!["login"]);
+        assert_eq!(login(None, None, None, None), vec!["login"]);
         assert_eq!(
             login(
                 Some(&i("proxy.example.com")),
                 Some(&i("alice")),
-                "local",
-                "otp"
+                Some(&AuthMethod::Local),
+                Some(MfaMode::Otp)
             ),
             vec![
                 "login",
@@ -361,8 +361,23 @@ mod tests {
         );
         // sso has no connector value → no --auth.
         assert_eq!(
-            login(Some(&i("proxy.example.com")), None, "sso", ""),
+            login(
+                Some(&i("proxy.example.com")),
+                None,
+                Some(&AuthMethod::Sso),
+                None
+            ),
             vec!["login", "--proxy=proxy.example.com"]
+        );
+        // A named connector is passed through; MFA uses tsh's own spelling.
+        assert_eq!(
+            login(
+                None,
+                None,
+                Some(&AuthMethod::try_from("okta").unwrap()),
+                Some(MfaMode::CrossPlatform)
+            ),
+            vec!["login", "--auth=okta", "--mfa-mode=cross-platform"]
         );
     }
 
