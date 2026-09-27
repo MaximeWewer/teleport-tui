@@ -1,6 +1,6 @@
 //! `tsh apps ls` → applications. DTOs + repository adapter + parsers.
 //!
-//! Child of `tsh`: shared helpers (`run_json`, `run_scoped_ls`,
+//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`,
 //! `classify_failure`, `sorted_labels`, `MetaDto`) and imports come via `super::*`.
 
 #![allow(clippy::question_mark, clippy::wildcard_imports)]
@@ -20,29 +20,17 @@ struct AppSpecDto {
     public_addr: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct TshAppRepository<R: CommandRunner> {
-    runner: R,
-    tsh: PathBuf,
-}
-
-impl<R: CommandRunner> TshAppRepository<R> {
-    pub fn new(runner: R, tsh: PathBuf) -> Self {
-        Self { runner, tsh }
-    }
-}
+tsh_adapter!(TshAppRepository);
 
 impl<R: CommandRunner> AppRepository for TshAppRepository<R> {
     fn list_apps(&self, ctx: &ClusterContext) -> Result<Vec<App>, DomainError> {
-        let stdout = run_scoped_ls(&self.runner, &self.tsh, &["apps"], ctx)?;
+        let stdout = self.cli.ls(&["apps"], ctx, true)?;
         parse_apps(&stdout)
     }
 }
 
 fn parse_apps(stdout: &str) -> Result<Vec<App>, DomainError> {
-    let dtos: Vec<AppDto> = DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-        detail: e.to_string(),
-    })?;
+    let dtos: Vec<AppDto> = parse_json(stdout)?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
         // Skip (don't fail on) a row whose name we refuse: one odd entry must

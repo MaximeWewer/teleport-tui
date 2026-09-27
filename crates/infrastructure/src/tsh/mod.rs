@@ -72,16 +72,23 @@ pub(crate) fn run_cli(
     }
 }
 
-fn run_json(
-    runner: &impl CommandRunner,
-
-    tsh: &Path,
-
-    args: Vec<String>,
-) -> Result<String, DomainError> {
-    run_cli(runner, tsh, args, "TSH_SPAWN_FAILED")
+/// Owned argv from string literals: `args(&["mfa", "ls"])`.
+pub(crate) fn args(parts: &[&str]) -> Vec<String> {
+    parts.iter().map(|s| (*s).to_owned()).collect()
 }
 
+/// Deserialize `--format=json` output, mapping a parser error to
+/// `DomainError::Parse` with the parser's message. Not for secret-bearing
+/// output: a parser message may quote its input.
+pub(crate) fn parse_json<T: DeJson>(stdout: &str) -> Result<T, DomainError> {
+    DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
+        detail: e.to_string(),
+    })
+}
+
+/// Resource metadata shared by most Teleport objects (`metadata.name` +
+/// optional labels). Undeclared fields are ignored by nanoserde. Private to
+/// `tsh` (nanoserde's derive rejects `pub(crate)`); `tctl` keeps its own copy.
 #[derive(Debug, DeJson)]
 struct MetaDto {
     name: String,
@@ -95,53 +102,63 @@ pub(crate) fn sorted_labels(labels: Option<HashMap<String, String>>) -> Vec<(Str
     v
 }
 
-/// Common scoped-listing prelude: reject offline cluster, run `tsh <verb> ls
-/// --format=json -c <cluster>`.
-fn run_scoped_ls(
-    runner: &impl CommandRunner,
-
-    tsh: &Path,
-
-    verb: &[&str],
-
-    ctx: &ClusterContext,
-) -> Result<String, DomainError> {
-    if !ctx.is_online() {
-        return Err(DomainError::ClusterOffline {
-            cluster: ctx.name.to_string(),
-        });
-    }
-    let mut args: Vec<String> = verb.iter().map(|s| (*s).to_owned()).collect();
-    args.push("ls".to_owned());
-    args.push("--format=json".to_owned());
-    args.push("-c".to_owned());
-    args.push(ctx.name.to_string());
-    run_json(runner, tsh, args)
+/// The `tsh` binary plus the runner that spawns it: the state every `tsh`
+/// adapter shares.
+#[derive(Debug, Clone)]
+struct TshCli<R: CommandRunner> {
+    runner: R,
+    tsh: PathBuf,
 }
 
-/// Like [`run_scoped_ls`] but WITHOUT the `-c <cluster>` flag, for `tsh`
-/// subcommands that reject it: `recordings ls` and `sessions ls` are audit /
-/// session commands scoped to the *current proxy*, not a named cluster (passing
-/// `-c` makes tsh error `unknown short flag '-c'`, which surfaced as an empty
-/// list). The offline guard on the current cluster still applies.
-fn run_unscoped_ls(
-    runner: &impl CommandRunner,
-
-    tsh: &Path,
-
-    verb: &[&str],
-
-    ctx: &ClusterContext,
-) -> Result<String, DomainError> {
-    if !ctx.is_online() {
-        return Err(DomainError::ClusterOffline {
-            cluster: ctx.name.to_string(),
-        });
+impl<R: CommandRunner> TshCli<R> {
+    /// Run `tsh <args>` and return stdout (see [`run_cli`]).
+    fn run(&self, args: Vec<String>) -> Result<String, DomainError> {
+        run_cli(&self.runner, &self.tsh, args, "TSH_SPAWN_FAILED")
     }
-    let mut args: Vec<String> = verb.iter().map(|s| (*s).to_owned()).collect();
-    args.push("ls".to_owned());
-    args.push("--format=json".to_owned());
-    run_json(runner, tsh, args)
+
+    /// Common listing prelude: reject an offline cluster, then run
+    /// `tsh <verb> ls --format=json`, adding `-c <cluster>` when `scoped`.
+    /// Cluster names come from a validated value object cross-checked against
+    /// the real topology, so they are safe to pass as `-c`.
+    ///
+    /// Unscoped is for `tsh` subcommands that reject `-c`: `recordings ls` and
+    /// `sessions ls` are audit / session commands scoped to the *current
+    /// proxy*, not a named cluster (passing `-c` makes tsh error `unknown short
+    /// flag '-c'`, which surfaced as an empty list). The offline guard on the
+    /// current cluster still applies.
+    fn ls(&self, verb: &[&str], ctx: &ClusterContext, scoped: bool) -> Result<String, DomainError> {
+        if !ctx.is_online() {
+            return Err(DomainError::ClusterOffline {
+                cluster: ctx.name.to_string(),
+            });
+        }
+        let mut argv = args(verb);
+        argv.extend(args(&["ls", "--format=json"]));
+        if scoped {
+            argv.push("-c".to_owned());
+            argv.push(ctx.name.to_string());
+        }
+        self.run(argv)
+    }
+}
+
+/// Declare a `tsh` adapter: a public struct wrapping [`TshCli`] with the
+/// `new(runner, tsh)` constructor the composition root calls.
+macro_rules! tsh_adapter {
+    ($name:ident) => {
+        #[derive(Debug, Clone)]
+        pub struct $name<R: CommandRunner> {
+            cli: TshCli<R>,
+        }
+
+        impl<R: CommandRunner> $name<R> {
+            pub fn new(runner: R, tsh: PathBuf) -> Self {
+                Self {
+                    cli: TshCli { runner, tsh },
+                }
+            }
+        }
+    };
 }
 
 mod app;
@@ -176,6 +193,51 @@ mod tests {
         assert!(matches!(
             classify_failure("certificate has expired"),
             DomainError::CertExpired
+        ));
+    }
+
+    /// Records the argv of the last command and succeeds with `[]`.
+    #[derive(Debug, Default)]
+    struct ArgvRunner(std::sync::Mutex<Vec<String>>);
+    impl CommandRunner for ArgvRunner {
+        fn run(&self, req: &CommandRequest) -> std::io::Result<crate::process::CommandOutcome> {
+            *self.0.lock().unwrap() = req.args.clone();
+            Ok(crate::process::CommandOutcome {
+                status: Some(0),
+                stdout: "[]".to_owned(),
+                stderr: String::new(),
+            })
+        }
+    }
+
+    fn ctx(status: ClusterStatus) -> ClusterContext {
+        ClusterContext {
+            name: ClusterName::try_from("leaf1").unwrap(),
+            kind: ClusterKind::Leaf,
+            status,
+        }
+    }
+
+    #[test]
+    fn ls_adds_cluster_flag_only_when_scoped() {
+        let cli = TshCli {
+            runner: ArgvRunner::default(),
+            tsh: "tsh".into(),
+        };
+        cli.ls(&["db"], &ctx(ClusterStatus::Online), true).unwrap();
+        assert_eq!(
+            *cli.runner.0.lock().unwrap(),
+            args(&["db", "ls", "--format=json", "-c", "leaf1"])
+        );
+        cli.ls(&["sessions"], &ctx(ClusterStatus::Online), false)
+            .unwrap();
+        assert_eq!(
+            *cli.runner.0.lock().unwrap(),
+            args(&["sessions", "ls", "--format=json"])
+        );
+        assert!(matches!(
+            cli.ls(&[], &ctx(ClusterStatus::Offline), true),
+            Err(DomainError::ClusterOffline { .. })
         ));
     }
 }

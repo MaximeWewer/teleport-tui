@@ -1,7 +1,7 @@
 //! `tsh status` / `tsh mfa ls` → profile + MFA devices, and `tsh login <cluster>`
 //! to re-select the active profile. DTOs + gateway adapter + parsers.
 //!
-//! Child of `tsh`: shared helpers (`run_json`, `run_scoped_ls`,
+//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`,
 //! `classify_failure`, `sorted_labels`, `MetaDto`) and imports come via `super::*`.
 
 #![allow(clippy::question_mark, clippy::wildcard_imports)]
@@ -31,22 +31,11 @@ struct ActiveDto {
     valid_until: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct TshAuthGateway<R: CommandRunner> {
-    runner: R,
-    tsh: PathBuf,
-}
-
-impl<R: CommandRunner> TshAuthGateway<R> {
-    pub fn new(runner: R, tsh: PathBuf) -> Self {
-        Self { runner, tsh }
-    }
-}
+tsh_adapter!(TshAuthGateway);
 
 impl<R: CommandRunner> AuthGateway for TshAuthGateway<R> {
     fn status(&self) -> Result<Option<Profile>, DomainError> {
-        let args = vec!["status".to_owned(), "--format=json".to_owned()];
-        match run_cli(&self.runner, &self.tsh, args, "TSH_SPAWN_FAILED") {
+        match self.cli.run(args(&["status", "--format=json"])) {
             Ok(stdout) => parse_status_json(&stdout),
             // Logged out is a normal state, not an error.
             Err(DomainError::NotAuthenticated) => Ok(None),
@@ -55,12 +44,7 @@ impl<R: CommandRunner> AuthGateway for TshAuthGateway<R> {
     }
 
     fn list_mfa_devices(&self) -> Result<Vec<MfaDevice>, DomainError> {
-        let args = vec![
-            "mfa".to_owned(),
-            "ls".to_owned(),
-            "--format=json".to_owned(),
-        ];
-        parse_mfa_devices(&run_cli(&self.runner, &self.tsh, args, "TSH_SPAWN_FAILED")?)
+        parse_mfa_devices(&self.cli.run(args(&["mfa", "ls", "--format=json"]))?)
     }
 
     fn select_cluster(&self, cluster: &ClusterName) -> Result<(), DomainError> {
@@ -76,8 +60,7 @@ impl<R: CommandRunner> AuthGateway for TshAuthGateway<R> {
         // is instant and silent. Failures go through the shared classifier, so a
         // network error or an expired cert stays distinguishable (with its
         // redacted stderr) from a plain "login required".
-        let args = vec!["login".to_owned(), cluster.to_string()];
-        match run_cli(&self.runner, &self.tsh, args, "TSH_SPAWN_FAILED") {
+        match self.cli.run(vec!["login".to_owned(), cluster.to_string()]) {
             Ok(_) => Ok(()),
             // Without a cached session tsh tries to prompt for credentials, which
             // fails here (stdin is not a tty): that is "login required" too.
@@ -143,10 +126,7 @@ struct MfaMetaDto {
 }
 
 fn parse_mfa_devices(stdout: &str) -> Result<Vec<MfaDevice>, DomainError> {
-    let dtos: Vec<MfaDeviceDto> =
-        DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-            detail: e.to_string(),
-        })?;
+    let dtos: Vec<MfaDeviceDto> = parse_json(stdout)?;
     Ok(dtos
         .into_iter()
         .map(|d| {
@@ -170,9 +150,7 @@ fn parse_mfa_devices(stdout: &str) -> Result<Vec<MfaDevice>, DomainError> {
 }
 
 fn parse_status_json(stdout: &str) -> Result<Option<Profile>, DomainError> {
-    let dto: StatusDto = DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-        detail: e.to_string(),
-    })?;
+    let dto: StatusDto = parse_json(stdout)?;
     Ok(dto.active.map(|a| Profile {
         username: a.username,
         cluster: a.cluster,

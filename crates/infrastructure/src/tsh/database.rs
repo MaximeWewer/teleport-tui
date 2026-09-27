@@ -1,6 +1,6 @@
 //! `tsh db ls` → databases. DTOs + repository adapter + parsers.
 //!
-//! Child of `tsh`: shared helpers (`run_json`, `run_scoped_ls`,
+//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`,
 //! `classify_failure`, `sorted_labels`, `MetaDto`) and imports come via `super::*`.
 
 #![allow(clippy::question_mark, clippy::wildcard_imports)]
@@ -20,29 +20,17 @@ struct DbSpecDto {
     uri: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct TshDatabaseRepository<R: CommandRunner> {
-    runner: R,
-    tsh: PathBuf,
-}
-
-impl<R: CommandRunner> TshDatabaseRepository<R> {
-    pub fn new(runner: R, tsh: PathBuf) -> Self {
-        Self { runner, tsh }
-    }
-}
+tsh_adapter!(TshDatabaseRepository);
 
 impl<R: CommandRunner> DatabaseRepository for TshDatabaseRepository<R> {
     fn list_databases(&self, ctx: &ClusterContext) -> Result<Vec<Database>, DomainError> {
-        let stdout = run_scoped_ls(&self.runner, &self.tsh, &["db"], ctx)?;
+        let stdout = self.cli.ls(&["db"], ctx, true)?;
         parse_databases(&stdout)
     }
 }
 
 fn parse_databases(stdout: &str) -> Result<Vec<Database>, DomainError> {
-    let dtos: Vec<DbDto> = DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-        detail: e.to_string(),
-    })?;
+    let dtos: Vec<DbDto> = parse_json(stdout)?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
         // Skip (don't fail on) a row whose name we refuse: one odd entry must

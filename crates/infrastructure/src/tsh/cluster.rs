@@ -1,6 +1,6 @@
 //! `tsh clusters` → root/leaf topology. DTOs + repository adapter + parsers.
 //!
-//! Child of `tsh`: shared helpers (`run_json`, `run_scoped_ls`,
+//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`,
 //! `classify_failure`, `sorted_labels`, `MetaDto`) and imports come via `super::*`.
 
 #![allow(clippy::question_mark, clippy::wildcard_imports)]
@@ -14,29 +14,12 @@ struct ClusterDto {
     selected: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct TshClusterRepository<R: CommandRunner> {
-    runner: R,
-    tsh: PathBuf,
-}
-
-impl<R: CommandRunner> TshClusterRepository<R> {
-    pub fn new(runner: R, tsh: PathBuf) -> Self {
-        Self { runner, tsh }
-    }
-}
+tsh_adapter!(TshClusterRepository);
 
 impl<R: CommandRunner> ClusterRepository for TshClusterRepository<R> {
     fn list_clusters(&self) -> Result<ClusterTopology, DomainError> {
-        let stdout = run_json(
-            &self.runner,
-            &self.tsh,
-            vec!["clusters".into(), "--format=json".into()],
-        )?;
-        let dtos: Vec<ClusterDto> =
-            DeJson::deserialize_json(&stdout).map_err(|e| DomainError::Parse {
-                detail: e.to_string(),
-            })?;
+        let stdout = self.cli.run(args(&["clusters", "--format=json"]))?;
+        let dtos: Vec<ClusterDto> = parse_json(&stdout)?;
 
         let mut selected: Option<ClusterName> = None;
         let mut contexts = Vec::with_capacity(dtos.len());

@@ -1,26 +1,16 @@
 //! `tsh sessions ls` → active sessions to join. DTOs + repository adapter + parsers.
 //!
-//! Child of `tsh`: shared helpers (`run_json`, `run_scoped_ls`,
+//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`,
 //! `classify_failure`, `sorted_labels`, `MetaDto`) and imports come via `super::*`.
 
 #![allow(clippy::question_mark, clippy::wildcard_imports)]
 use super::*;
 
-#[derive(Debug, Clone)]
-pub struct TshSessionRepository<R: CommandRunner> {
-    runner: R,
-    tsh: PathBuf,
-}
-
-impl<R: CommandRunner> TshSessionRepository<R> {
-    pub fn new(runner: R, tsh: PathBuf) -> Self {
-        Self { runner, tsh }
-    }
-}
+tsh_adapter!(TshSessionRepository);
 
 impl<R: CommandRunner> SessionRepository for TshSessionRepository<R> {
     fn list_sessions(&self, ctx: &ClusterContext) -> Result<Vec<ActiveSession>, DomainError> {
-        let stdout = run_unscoped_ls(&self.runner, &self.tsh, &["sessions"], ctx)?;
+        let stdout = self.cli.ls(&["sessions"], ctx, false)?;
         parse_sessions(&stdout)
     }
 }
@@ -47,10 +37,7 @@ struct SessionSpecDto {
 }
 
 fn parse_sessions(stdout: &str) -> Result<Vec<ActiveSession>, DomainError> {
-    let dtos: Vec<SessionTrackerDto> =
-        DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-            detail: e.to_string(),
-        })?;
+    let dtos: Vec<SessionTrackerDto> = parse_json(stdout)?;
     Ok(dtos
         .into_iter()
         .filter(|d| !d.spec.session_id.is_empty())

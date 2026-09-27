@@ -1,6 +1,6 @@
 //! `tsh kube ls` → Kubernetes clusters. DTOs + repository adapter + parsers.
 //!
-//! Child of `tsh`: shared helpers (`run_json`, `run_scoped_ls`,
+//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`,
 //! `classify_failure`, `sorted_labels`, `MetaDto`) and imports come via `super::*`.
 
 #![allow(clippy::question_mark, clippy::wildcard_imports)]
@@ -13,29 +13,17 @@ struct KubeDto {
     labels: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct TshKubeRepository<R: CommandRunner> {
-    runner: R,
-    tsh: PathBuf,
-}
-
-impl<R: CommandRunner> TshKubeRepository<R> {
-    pub fn new(runner: R, tsh: PathBuf) -> Self {
-        Self { runner, tsh }
-    }
-}
+tsh_adapter!(TshKubeRepository);
 
 impl<R: CommandRunner> KubeRepository for TshKubeRepository<R> {
     fn list_kube(&self, ctx: &ClusterContext) -> Result<Vec<KubeCluster>, DomainError> {
-        let stdout = run_scoped_ls(&self.runner, &self.tsh, &["kube"], ctx)?;
+        let stdout = self.cli.ls(&["kube"], ctx, true)?;
         parse_kube(&stdout)
     }
 }
 
 fn parse_kube(stdout: &str) -> Result<Vec<KubeCluster>, DomainError> {
-    let dtos: Vec<KubeDto> = DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-        detail: e.to_string(),
-    })?;
+    let dtos: Vec<KubeDto> = parse_json(stdout)?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
         // Skip (don't fail on) a row whose name we refuse: one odd entry must

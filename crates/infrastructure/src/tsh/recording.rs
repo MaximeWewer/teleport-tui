@@ -1,26 +1,16 @@
 //! `tsh recordings ls` → session recordings (audit stream). DTOs + repository adapter + parsers.
 //!
-//! Child of `tsh`: shared helpers (`run_json`, `run_scoped_ls`,
+//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`,
 //! `classify_failure`, `sorted_labels`, `MetaDto`) and imports come via `super::*`.
 
 #![allow(clippy::question_mark, clippy::wildcard_imports)]
 use super::*;
 
-#[derive(Debug, Clone)]
-pub struct TshRecordingRepository<R: CommandRunner> {
-    runner: R,
-    tsh: PathBuf,
-}
-
-impl<R: CommandRunner> TshRecordingRepository<R> {
-    pub fn new(runner: R, tsh: PathBuf) -> Self {
-        Self { runner, tsh }
-    }
-}
+tsh_adapter!(TshRecordingRepository);
 
 impl<R: CommandRunner> RecordingRepository for TshRecordingRepository<R> {
     fn list_recordings(&self, ctx: &ClusterContext) -> Result<Vec<SessionRecording>, DomainError> {
-        let stdout = run_unscoped_ls(&self.runner, &self.tsh, &["recordings"], ctx)?;
+        let stdout = self.cli.ls(&["recordings"], ctx, false)?;
         parse_recordings(&stdout)
     }
 }
@@ -49,10 +39,7 @@ struct RecordingDto {
 }
 
 fn parse_recordings(stdout: &str) -> Result<Vec<SessionRecording>, DomainError> {
-    let dtos: Vec<RecordingDto> =
-        DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-            detail: e.to_string(),
-        })?;
+    let dtos: Vec<RecordingDto> = parse_json(stdout)?;
     // `tsh recordings ls` returns a raw audit-event stream. Keep only the
     // `session.end` events (a completed, playable SSH/kube recording, keyed by
     // `sid`); this drops the streaming `app.session.chunk` events - which are the

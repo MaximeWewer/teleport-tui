@@ -1,6 +1,6 @@
 //! `tsh request ls` → access requests. DTOs + repository adapter + parsers.
 //!
-//! Child of `tsh`: shared helpers (`run_json`, `run_scoped_ls`,
+//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`,
 //! `classify_failure`, `sorted_labels`, `MetaDto`) and imports come via `super::*`.
 
 #![allow(clippy::question_mark, clippy::wildcard_imports)]
@@ -8,13 +8,8 @@ use super::*;
 
 #[derive(Debug, DeJson)]
 struct RequestDto {
-    metadata: ReqMetaDto,
+    metadata: MetaDto,
     spec: RequestSpecDto,
-}
-
-#[derive(Debug, DeJson)]
-struct ReqMetaDto {
-    name: String,
 }
 
 #[derive(Debug, DeJson)]
@@ -32,30 +27,17 @@ struct RequestSpecDto {
     created: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct TshRequestRepository<R: CommandRunner> {
-    runner: R,
-    tsh: PathBuf,
-}
-
-impl<R: CommandRunner> TshRequestRepository<R> {
-    pub fn new(runner: R, tsh: PathBuf) -> Self {
-        Self { runner, tsh }
-    }
-}
+tsh_adapter!(TshRequestRepository);
 
 impl<R: CommandRunner> RequestRepository for TshRequestRepository<R> {
     fn list_requests(&self, ctx: &ClusterContext) -> Result<Vec<AccessRequest>, DomainError> {
-        let stdout = run_scoped_ls(&self.runner, &self.tsh, &["request"], ctx)?;
+        let stdout = self.cli.ls(&["request"], ctx, true)?;
         parse_requests(&stdout)
     }
 }
 
 fn parse_requests(stdout: &str) -> Result<Vec<AccessRequest>, DomainError> {
-    let dtos: Vec<RequestDto> =
-        DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-            detail: e.to_string(),
-        })?;
+    let dtos: Vec<RequestDto> = parse_json(stdout)?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
         // Skip (don't fail on) a row whose id we refuse: one odd entry must not
