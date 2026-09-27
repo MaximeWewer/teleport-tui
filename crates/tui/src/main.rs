@@ -87,11 +87,7 @@ fn real_main() -> Result<(), String> {
         ));
     }
     let admin: Box<dyn AdminRepository> = match &tctl {
-        Some(path) => Box::new(TctlAdminRepository::new(
-            SystemCommandRunner,
-            path.clone(),
-            tsh.clone(),
-        )),
+        Some(path) => Box::new(TctlAdminRepository::new(SystemCommandRunner, path.clone())),
         None => Box::new(UnavailableAdmin),
     };
 

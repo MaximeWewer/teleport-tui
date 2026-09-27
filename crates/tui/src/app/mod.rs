@@ -11,7 +11,7 @@ use application::error::AppError;
 use application::use_case::{
     AddUser, GenerateToken, GetStatus, ListApps, ListBots, ListClusters, ListDatabases,
     ListInstances, ListKube, ListMfaDevices, ListNodes, ListRecordings, ListRequests, ListRoles,
-    ListSessions, ListTokens, ListUsers, RemoveToken, ResetUser,
+    ListSessions, ListTokens, ListUsers, ProbeAdminRights, RemoveToken, ResetUser, SelectCluster,
 };
 use domain::admin::{
     AdminRole, AdminUser, Bot, GeneratedToken, Instance, InviteLink, ProvisionToken,

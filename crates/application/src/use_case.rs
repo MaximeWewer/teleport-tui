@@ -16,7 +16,7 @@ use domain::recording::SessionRecording;
 use domain::request::AccessRequest;
 use domain::resource::{App, Database, KubeCluster};
 use domain::session::ActiveSession;
-use domain::value::{ResourceName, RoleList, TokenTypes};
+use domain::value::{ClusterName, ResourceName, RoleList, TokenTypes};
 
 use crate::error::AppError;
 
@@ -309,6 +309,47 @@ impl<'a> GetStatus<'a> {
     /// Propagates gateway failures as [`AppError`].
     pub fn execute(&self) -> Result<Option<Profile>, AppError> {
         Ok(self.gateway.status()?)
+    }
+}
+
+/// Re-select `cluster` as the active profile (non-interactive, needs a cached
+/// session), so a following `tctl` / flagless `tsh` call targets it.
+#[derive(Debug)]
+pub struct SelectCluster<'a> {
+    gateway: &'a dyn AuthGateway,
+}
+
+impl<'a> SelectCluster<'a> {
+    #[must_use]
+    pub fn new(gateway: &'a dyn AuthGateway) -> Self {
+        Self { gateway }
+    }
+
+    /// # Errors
+    /// Propagates gateway failures (`NotAuthenticated` = a fresh interactive
+    /// login is needed) as [`AppError`].
+    pub fn execute(&self, cluster: &ClusterName) -> Result<(), AppError> {
+        Ok(self.gateway.select_cluster(cluster)?)
+    }
+}
+
+/// Probe whether the current identity has `tctl` admin rights: `Ok(false)` for
+/// no rights, `Err` when the probe itself could not run.
+#[derive(Debug)]
+pub struct ProbeAdminRights<'a> {
+    repo: &'a dyn AdminRepository,
+}
+
+impl<'a> ProbeAdminRights<'a> {
+    #[must_use]
+    pub fn new(repo: &'a dyn AdminRepository) -> Self {
+        Self { repo }
+    }
+
+    /// # Errors
+    /// Propagates a probe that could not run as [`AppError`].
+    pub fn execute(&self) -> Result<bool, AppError> {
+        Ok(self.repo.can_admin()?)
     }
 }
 

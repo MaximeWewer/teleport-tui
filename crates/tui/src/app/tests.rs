@@ -144,9 +144,6 @@ impl AdminRepository for FakeAdmin {
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
         Ok(vec![])
     }
-    fn select_cluster(&self, _cluster: &ClusterName) -> Result<(), DomainError> {
-        Ok(())
-    }
     fn generate_token(&self, token_type: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         Ok(GeneratedToken {
             token: SecretString::new("secret-token-value".to_owned()),
@@ -230,6 +227,76 @@ impl AuthGateway for FakeAuth {
             valid_until: "2026-06-29T10:00:00Z".to_owned(),
         }))
     }
+    fn select_cluster(&self, _cluster: &ClusterName) -> Result<(), DomainError> {
+        Ok(())
+    }
+}
+
+type SelectFn = dyn Fn(&ClusterName) -> Result<(), DomainError> + Send + Sync;
+
+/// [`FakeAuth`] whose profile switch (`select_cluster`) is `select`, to record
+/// the re-keys or fail them for chosen clusters.
+struct SelectAuth(Box<SelectFn>);
+
+impl SelectAuth {
+    fn new(
+        select: impl Fn(&ClusterName) -> Result<(), DomainError> + Send + Sync + 'static,
+    ) -> Self {
+        Self(Box::new(select))
+    }
+}
+
+impl std::fmt::Debug for SelectAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SelectAuth")
+    }
+}
+
+impl AuthGateway for SelectAuth {
+    fn status(&self) -> Result<Option<Profile>, DomainError> {
+        FakeAuth.status()
+    }
+    fn list_mfa_devices(&self) -> Result<Vec<MfaDevice>, DomainError> {
+        FakeAuth.list_mfa_devices()
+    }
+    fn select_cluster(&self, cluster: &ClusterName) -> Result<(), DomainError> {
+        (self.0)(cluster)
+    }
+}
+
+/// Auth whose profile switch only works for the root cluster; every leaf needs
+/// an interactive login (exercises the login-required placeholder).
+fn root_only_auth() -> SelectAuth {
+    SelectAuth::new(|c| {
+        if c.as_str() == "root.example" {
+            Ok(())
+        } else {
+            Err(DomainError::NotAuthenticated)
+        }
+    })
+}
+
+/// Auth that records every profile re-key, in order.
+fn recording_auth(calls: &std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> SelectAuth {
+    let calls = std::sync::Arc::clone(calls);
+    SelectAuth::new(move |c| {
+        calls.lock().unwrap().push(c.to_string());
+        Ok(())
+    })
+}
+
+/// Auth whose profile switch to `fails` errors (network), others succeed.
+fn failing_select_auth(fails: &'static str) -> SelectAuth {
+    SelectAuth::new(move |c| {
+        if c.as_str() == fails {
+            Err(DomainError::Backend {
+                code: "TSH_EXEC_FAILED",
+                detail: "connection refused".to_owned(),
+            })
+        } else {
+            Ok(())
+        }
+    })
 }
 
 /// Admin repo that denies every call - models a user without admin rights
@@ -252,7 +319,7 @@ fn test_app() -> App {
     test_app_with_admin(Box::new(FakeAdmin))
 }
 
-fn test_repos(admin: Box<dyn AdminRepository>) -> Repositories {
+fn test_repos_with(admin: Box<dyn AdminRepository>, auth: Box<dyn AuthGateway>) -> Repositories {
     Repositories {
         clusters: Box::new(FakeClusters),
         nodes: Box::new(FakeNodes),
@@ -262,14 +329,18 @@ fn test_repos(admin: Box<dyn AdminRepository>) -> Repositories {
         requests: Box::new(FakeRequests),
         recordings: Box::new(FakeRecordings),
         sessions: Box::new(FakeSessions),
-        auth: Box::new(FakeAuth),
+        auth,
         admin,
     }
 }
 
 fn test_app_with_admin(admin: Box<dyn AdminRepository>) -> App {
+    test_app_with(admin, Box::new(FakeAuth))
+}
+
+fn test_app_with(admin: Box<dyn AdminRepository>, auth: Box<dyn AuthGateway>) -> App {
     let logger = NdjsonLogger::new(PathBuf::from("/dev/null"));
-    let repos = test_repos(admin);
+    let repos = test_repos_with(admin, auth);
     // `synchronous = true`: jobs run inline so tests are deterministic.
     let settings = Settings {
         kube_tools: vec!["shell".to_owned(), "k9s".to_owned()],
@@ -528,68 +599,12 @@ impl AdminRepository for CountingAdmin {
     fn generate_token(&self, _t: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         Err(DomainError::BinaryNotFound)
     }
-    // A working profile switch lets the all-clusters admin fan-out reach
-    // every cluster (otherwise each would read as login-required).
-    fn select_cluster(&self, _proxy: &ClusterName) -> Result<(), DomainError> {
-        Ok(())
-    }
-}
-
-/// Admin that only has a live session for the root cluster; every leaf
-/// requires an interactive login (exercises the login-required placeholder).
-#[derive(Debug)]
-struct RootOnlyAdmin;
-impl AdminRepository for RootOnlyAdmin {
-    fn list_users(&self) -> Result<Vec<AdminUser>, DomainError> {
-        Ok(vec![AdminUser {
-            name: domain::value::ResourceName::try_from("alice").unwrap(),
-            roles: vec![],
-            labels: vec![],
-        }])
-    }
-    fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
-        Ok(vec![])
-    }
-    fn generate_token(&self, _t: &TokenTypes) -> Result<GeneratedToken, DomainError> {
-        Err(DomainError::BinaryNotFound)
-    }
-    fn select_cluster(&self, proxy: &ClusterName) -> Result<(), DomainError> {
-        if proxy.as_str() == "root.example" {
-            Ok(())
-        } else {
-            Err(DomainError::NotAuthenticated)
-        }
-    }
-}
-
-/// Admin that records every `select_cluster` (profile re-key) in order, to prove
-/// the scoped-admin path re-keys the viewed cluster around the `tctl` call.
-#[derive(Debug)]
-struct RecordingAdmin(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
-impl AdminRepository for RecordingAdmin {
-    fn list_users(&self) -> Result<Vec<AdminUser>, DomainError> {
-        Ok(vec![AdminUser {
-            name: domain::value::ResourceName::try_from("alice").unwrap(),
-            roles: vec![],
-            labels: vec![],
-        }])
-    }
-    fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
-        Ok(vec![])
-    }
-    fn generate_token(&self, _t: &TokenTypes) -> Result<GeneratedToken, DomainError> {
-        Err(DomainError::BinaryNotFound)
-    }
-    fn select_cluster(&self, proxy: &ClusterName) -> Result<(), DomainError> {
-        self.0.lock().unwrap().push(proxy.to_string());
-        Ok(())
-    }
 }
 
 #[test]
 fn scoped_admin_rekeys_selected_cluster_then_restores_root() {
     let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let mut app = test_app_with_admin(Box::new(RecordingAdmin(calls.clone())));
+    let mut app = test_app_with(Box::new(FakeAdmin), Box::new(recording_auth(&calls)));
     // View a leaf cluster - the UI selection the tsh profile does NOT follow, so
     // a naive `tctl` listing would hit whatever ~/.tsh last pointed at.
     app.topology
@@ -618,7 +633,7 @@ fn scoped_admin_rekeys_selected_cluster_then_restores_root() {
 fn superseded_scoped_admin_job_skips_its_work() {
     use std::sync::atomic::AtomicU64;
     let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
-    let repos = test_repos(Box::new(RecordingAdmin(calls.clone())));
+    let repos = test_repos_with(Box::new(FakeAdmin), Box::new(recording_auth(&calls)));
     let latest = AtomicU64::new(7);
 
     let stale =
@@ -635,47 +650,13 @@ fn superseded_scoped_admin_job_skips_its_work() {
     );
 }
 
-/// Admin whose profile switch to `fails` errors; counts `list_users` calls to
-/// prove a failed switch never runs the listing against the wrong cluster.
-#[derive(Debug)]
-struct FailingSelectAdmin {
-    fails: &'static str,
-    listed: std::sync::Arc<AtomicUsize>,
-}
-impl AdminRepository for FailingSelectAdmin {
-    fn list_users(&self) -> Result<Vec<AdminUser>, DomainError> {
-        self.listed.fetch_add(1, Ordering::SeqCst);
-        Ok(vec![AdminUser {
-            name: domain::value::ResourceName::try_from("alice").unwrap(),
-            roles: vec![],
-            labels: vec![],
-        }])
-    }
-    fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
-        Ok(vec![])
-    }
-    fn generate_token(&self, _t: &TokenTypes) -> Result<GeneratedToken, DomainError> {
-        Err(DomainError::BinaryNotFound)
-    }
-    fn select_cluster(&self, proxy: &ClusterName) -> Result<(), DomainError> {
-        if proxy.as_str() == self.fails {
-            Err(DomainError::Backend {
-                code: "TSH_EXEC_FAILED",
-                detail: "connection refused".to_owned(),
-            })
-        } else {
-            Ok(())
-        }
-    }
-}
-
 #[test]
 fn scoped_admin_does_not_list_when_the_cluster_switch_fails() {
     let listed = std::sync::Arc::new(AtomicUsize::new(0));
-    let mut app = test_app_with_admin(Box::new(FailingSelectAdmin {
-        fails: "leaf.example",
-        listed: listed.clone(),
-    }));
+    let mut app = test_app_with(
+        Box::new(CountingAdmin(listed.clone())),
+        Box::new(failing_select_auth("leaf.example")),
+    );
     app.topology
         .as_mut()
         .unwrap()
@@ -700,10 +681,10 @@ fn scoped_admin_does_not_list_when_the_cluster_switch_fails() {
 #[test]
 fn scoped_admin_surfaces_a_failed_root_restore() {
     let listed = std::sync::Arc::new(AtomicUsize::new(0));
-    let mut app = test_app_with_admin(Box::new(FailingSelectAdmin {
-        fails: "root.example",
-        listed: listed.clone(),
-    }));
+    let mut app = test_app_with(
+        Box::new(CountingAdmin(listed.clone())),
+        Box::new(failing_select_auth("root.example")),
+    );
     app.topology
         .as_mut()
         .unwrap()
@@ -763,7 +744,7 @@ fn admin_tab_aggregates_across_clusters() {
 
 #[test]
 fn admin_aggregate_marks_unauthenticated_clusters_login_required() {
-    let mut app = test_app_with_admin(Box::new(RootOnlyAdmin));
+    let mut app = test_app_with(Box::new(FakeAdmin), Box::new(root_only_auth()));
     app.on_key(press('c'));
     app.on_key(KeyEvent::from(KeyCode::Up));
     app.on_key(KeyEvent::from(KeyCode::Enter));
@@ -978,7 +959,7 @@ fn actions_on_an_aggregate_error_row_are_no_ops_with_a_status() {
 
 #[test]
 fn recordings_aggregate_across_clusters_and_play() {
-    // CountingAdmin.select_cluster returns Ok, so the serial recordings
+    // FakeAuth.select_cluster returns Ok, so the serial recordings
     // fan-out reaches every cluster (Recordings has no cluster flag, so it
     // uses the same profile-switch path as the admin tabs).
     let counter = std::sync::Arc::new(AtomicUsize::new(0));

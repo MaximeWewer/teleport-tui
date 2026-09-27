@@ -138,9 +138,9 @@ fn run_job(repos: &Repositories, job: Job) -> JobResult {
         Job::GenerateToken(ty) => {
             JobResult::Token(GenerateToken::new(repos.admin.as_ref()).execute(&ty))
         }
-        Job::AdminProbe => match repos.admin.can_admin() {
+        Job::AdminProbe => match ProbeAdminRights::new(repos.admin.as_ref()).execute() {
             Ok(ok) => JobResult::AdminAllowed(ok),
-            Err(e) => JobResult::AdminProbeFailed(e.into()),
+            Err(e) => JobResult::AdminProbeFailed(e),
         },
         Job::Aggregate { tab, ctx } => {
             let rows = aggregate_rows(repos, tab, &ctx);
@@ -195,9 +195,9 @@ fn run_scoped(
     cluster: &ClusterName,
     root: &ClusterName,
 ) -> Vec<JobResult> {
-    let result = match repos.admin.select_cluster(cluster) {
+    let result = match select_cluster(repos, cluster) {
         Ok(()) => run_job(repos, job),
-        Err(e) => failed_job(job, e.into()),
+        Err(e) => failed_job(job, e),
     };
     let mut out = vec![result];
     out.extend(restore_root(repos, root));
@@ -223,15 +223,18 @@ pub(super) fn run_scoped_if_latest(
     run_scoped(repos, job, cluster, root)
 }
 
+/// Make `cluster` the active profile (`tsh login <cluster>`).
+fn select_cluster(repos: &Repositories, cluster: &ClusterName) -> Result<(), AppError> {
+    SelectCluster::new(repos.auth.as_ref()).execute(cluster)
+}
+
 /// Re-select the `root` profile; `Some(RestoreFailed)` if that fails.
 fn restore_root(repos: &Repositories, root: &ClusterName) -> Option<JobResult> {
-    repos
-        .admin
-        .select_cluster(root)
+    select_cluster(repos, root)
         .err()
-        .map(|e| JobResult::RestoreFailed {
+        .map(|error| JobResult::RestoreFailed {
             root: root.clone(),
-            error: e.into(),
+            error,
         })
 }
 
@@ -245,7 +248,7 @@ fn admin_cluster_rows(repos: &Repositories, tab: Tab, ctx: &ClusterContext) -> V
     let cluster = ctx.name.clone();
     // Recordings carries a per-row sid (for `tsh play`); the admin tabs don't.
     if tab == Tab::Recordings {
-        return match repos.admin.select_cluster(&cluster) {
+        return match select_cluster(repos, &cluster) {
             Ok(()) => match ListRecordings::new(repos.recordings.as_ref()).execute(ctx) {
                 Ok(recs) => recs
                     .into_iter()
@@ -262,7 +265,7 @@ fn admin_cluster_rows(repos: &Repositories, tab: Tab, ctx: &ClusterContext) -> V
             Err(e) => vec![select_failed_row(cluster, e)],
         };
     }
-    match repos.admin.select_cluster(&cluster) {
+    match select_cluster(repos, &cluster) {
         Ok(()) => match admin_rows(repos, tab) {
             Ok(rows) => rows
                 .into_iter()
@@ -308,10 +311,12 @@ pub(super) fn err_row(cluster: ClusterName, e: &AppError) -> AggRow {
 /// The placeholder for a cluster whose profile could not be selected: a
 /// login-required row (actionable with `L`) when only a fresh login can fix it,
 /// otherwise the real error (network, backend, …).
-fn select_failed_row(cluster: ClusterName, e: DomainError) -> AggRow {
+fn select_failed_row(cluster: ClusterName, e: AppError) -> AggRow {
     match e {
-        DomainError::NotAuthenticated | DomainError::CertExpired => login_required_row(cluster),
-        e => err_row(cluster, &e.into()),
+        AppError::Domain(DomainError::NotAuthenticated | DomainError::CertExpired) => {
+            login_required_row(cluster)
+        }
+        e @ AppError::Domain(_) => err_row(cluster, &e),
     }
 }
 
