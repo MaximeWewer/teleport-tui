@@ -486,6 +486,9 @@ impl ChildRegistry {
         }
         let child = own_group(cmd).spawn()?;
         tracked.pids.push(child.id());
+        // End of the critical section: the child is listed, so a shutdown
+        // taking the lock from here on will see it.
+        drop(tracked);
         Ok(child)
     }
 
