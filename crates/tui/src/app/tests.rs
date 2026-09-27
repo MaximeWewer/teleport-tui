@@ -247,9 +247,8 @@ fn test_app() -> App {
     test_app_with_admin(Box::new(FakeAdmin))
 }
 
-fn test_app_with_admin(admin: Box<dyn AdminRepository>) -> App {
-    let logger = NdjsonLogger::new(PathBuf::from("/dev/null"));
-    let repos = Repositories {
+fn test_repos(admin: Box<dyn AdminRepository>) -> Repositories {
+    Repositories {
         clusters: Box::new(FakeClusters),
         nodes: Box::new(FakeNodes),
         kube: Box::new(FakeKube),
@@ -260,7 +259,12 @@ fn test_app_with_admin(admin: Box<dyn AdminRepository>) -> App {
         sessions: Box::new(FakeSessions),
         auth: Box::new(FakeAuth),
         admin,
-    };
+    }
+}
+
+fn test_app_with_admin(admin: Box<dyn AdminRepository>) -> App {
+    let logger = NdjsonLogger::new(PathBuf::from("/dev/null"));
+    let repos = test_repos(admin);
     // `synchronous = true`: jobs run inline so tests are deterministic.
     let settings = Settings {
         kube_tools: vec!["shell".to_owned(), "k9s".to_owned()],
@@ -598,6 +602,28 @@ fn scoped_admin_rekeys_selected_cluster_then_restores_root() {
     );
     // The listing still lands (one user).
     assert_eq!(app.visible.len(), 1);
+}
+
+// A scoped admin job superseded by a newer tab request while it queued on the
+// profile lock does no work at all (no re-key, no listing, no restore) and
+// yields nothing; the current one runs normally.
+#[test]
+fn superseded_scoped_admin_job_skips_its_work() {
+    use std::sync::atomic::AtomicU64;
+    let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let repos = test_repos(Box::new(RecordingAdmin(calls.clone())));
+    let latest = AtomicU64::new(7);
+
+    let stale = dispatch::run_scoped_if_latest(&repos, &latest, 5, Job::Users, "leaf", "root");
+    assert!(stale.is_empty());
+    assert!(calls.lock().unwrap().is_empty());
+
+    let current = dispatch::run_scoped_if_latest(&repos, &latest, 7, Job::Users, "leaf", "root");
+    assert!(matches!(current.as_slice(), [JobResult::Users(Ok(u))] if u.len() == 1));
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec!["leaf".to_owned(), "root".to_owned()]
+    );
 }
 
 /// Admin whose profile switch to `fails` errors; counts `list_users` calls to

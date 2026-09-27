@@ -9,6 +9,7 @@
 
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A unit of CLI work to run off the UI thread.
 #[derive(Debug)]
@@ -193,6 +194,25 @@ fn run_scoped(repos: &Repositories, job: Job, cluster: &str, root: &str) -> Vec<
     out
 }
 
+/// [`run_scoped`], unless `seq` is no longer the latest active-tab request. Called
+/// once the profile lock is held: by then a newer tab load may have been issued
+/// (the user flicked past this tab), and the UI discards a stale `seq`'s result
+/// anyway, so the superseded job skips its ~3s of `tsh login` + `tctl` + restore
+/// and yields nothing instead of delaying the job the user landed on.
+pub(super) fn run_scoped_if_latest(
+    repos: &Repositories,
+    latest: &AtomicU64,
+    seq: u64,
+    job: Job,
+    cluster: &str,
+    root: &str,
+) -> Vec<JobResult> {
+    if latest.load(Ordering::Acquire) != seq {
+        return Vec::new();
+    }
+    run_scoped(repos, job, cluster, root)
+}
+
 /// Re-select the `root` profile; `Some(RestoreFailed)` if that fails.
 fn restore_root(repos: &Repositories, root: &str) -> Option<JobResult> {
     repos
@@ -355,6 +375,10 @@ pub(super) struct Dispatcher {
     /// shared profile; without this lock two concurrent worker threads could flip
     /// it mid-listing and make a `tctl` read return another cluster's data.
     profile_lock: Arc<Mutex<()>>,
+    /// The latest active-tab request (`App::tab_req`), so a queued scoped admin
+    /// job can tell it was superseded before doing any work
+    /// ([`run_scoped_if_latest`]).
+    tab_latest: Arc<AtomicU64>,
     /// Bounded worker pool for [`Dispatcher::spawn_job`] (async mode only). A wide
     /// fan-out (one job per tab per online cluster) enqueues here instead of
     /// spawning an unbounded number of threads / concurrent `tsh` subprocesses.
@@ -380,6 +404,7 @@ impl Dispatcher {
             proxy_tx,
             proxy_rx,
             profile_lock: Arc::new(Mutex::new(())),
+            tab_latest: Arc::new(AtomicU64::new(0)),
             work_tx,
             synchronous,
         }
@@ -435,6 +460,12 @@ impl Dispatcher {
         None
     }
 
+    /// Record `seq` as the latest active-tab request; older queued scoped admin
+    /// jobs then skip their work.
+    pub(super) fn note_tab_request(&self, seq: u64) {
+        self.tab_latest.store(seq, Ordering::Release);
+    }
+
     /// Run a single-cluster admin (`tctl`) job against `cluster` by re-keying the
     /// profile to it first (`tsh login --proxy`), then restoring `root`. `tctl`
     /// has no cluster flag - it targets whatever cluster `~/.tsh` currently points
@@ -444,7 +475,9 @@ impl Dispatcher {
     /// fan-out and the after-action restore so the shared profile can't be flipped
     /// mid-listing. Restoring to root (not the leaf) leaves the profile where the
     /// follow-up admin *actions* (`tokens add`, `users add`, …) also work. The
-    /// listing's `JobResult` type is unchanged; only its execution is wrapped.
+    /// listing's `JobResult` type is unchanged; only its execution is wrapped. A job
+    /// superseded by a newer tab request while it waited for the lock is skipped
+    /// ([`run_scoped_if_latest`]).
     ///
     /// [`profile_lock`]: Dispatcher::profile_lock
     pub(super) fn spawn_admin_scoped(
@@ -455,7 +488,7 @@ impl Dispatcher {
         root: String,
     ) -> Vec<(u64, JobResult)> {
         if self.synchronous {
-            return run_scoped(&self.repos, job, &cluster, &root)
+            return run_scoped_if_latest(&self.repos, &self.tab_latest, seq, job, &cluster, &root)
                 .into_iter()
                 .map(|r| (seq, r))
                 .collect();
@@ -463,14 +496,16 @@ impl Dispatcher {
         let repos = Arc::clone(&self.repos);
         let tx = self.job_tx.clone();
         let profile_lock = Arc::clone(&self.profile_lock);
+        let latest = Arc::clone(&self.tab_latest);
         std::thread::spawn(move || {
             // Switch, read and restore root all inside the critical section (see
-            // spawn_admin_stream).
+            // spawn_admin_stream). A job superseded while it waited for the lock
+            // does none of it.
             let results = {
                 let _guard = profile_lock
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                run_scoped(&repos, job, &cluster, &root)
+                run_scoped_if_latest(&repos, &latest, seq, job, &cluster, &root)
             };
             for result in results {
                 let _ = tx.send((seq, result));

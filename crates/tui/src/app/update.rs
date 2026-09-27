@@ -15,14 +15,21 @@ impl App {
     /// Dispatch the active-tab data job, marking the tab as loading and tagging
     /// the request so stale results (from a superseded request) are discarded.
     fn dispatch_tab(&mut self, job: Job) {
+        let seq = self.begin_tab_request();
+        self.send(seq, job);
+    }
+
+    /// Start a new active-tab request: bump (and publish to the dispatcher) the
+    /// request counter, and mark the tab as loading. Returns the request's seq.
+    fn begin_tab_request(&mut self) -> u64 {
         self.tab_req += 1;
+        self.dispatcher.note_tab_request(self.tab_req);
         self.loading = true;
         // Clear stale rows so the spinner shows an empty table, not the
         // previous tab's selection indices, until the result lands.
         self.visible.clear();
         self.table.select(None);
-        let seq = self.tab_req;
-        self.send(seq, job);
+        self.tab_req
     }
 
     fn send(&mut self, seq: u64, job: Job) {
@@ -459,11 +466,7 @@ impl App {
             self.dispatch_tab(job);
             return;
         };
-        self.tab_req += 1;
-        self.loading = true;
-        self.visible.clear();
-        self.table.select(None);
-        let seq = self.tab_req;
+        let seq = self.begin_tab_request();
         for (seq, result) in self.dispatcher.spawn_admin_scoped(seq, job, cluster, root) {
             self.apply(seq, result);
         }
