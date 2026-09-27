@@ -541,4 +541,4 @@ pub(crate) fn tab_columns(tab: Tab) -> &'static [&'static str] {
 }
 
 /// Spinner animation frames.
-pub(crate) const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+pub(super) const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];

@@ -14,11 +14,41 @@
     )
 )]
 
+// In a binary crate nothing is exported, so an item shared across these
+// modules can only be `pub(crate)`: `pub` trips `unreachable_pub`, and
+// `redundant_pub_crate` checks the resolved visibility, so `pub(super)` or
+// `pub(in crate)` from a top-level module is flagged just the same. The two
+// lints conflict here; `unreachable_pub` wins and items stay `pub(crate)`
+// unless a narrower visibility (e.g. `pub(super)` inside `app`) is enough.
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "binary crate: shared items must be pub(crate), pub trips unreachable_pub"
+)]
 mod app;
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "binary crate: shared items must be pub(crate), pub trips unreachable_pub"
+)]
 mod forms;
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "binary crate: shared items must be pub(crate), pub trips unreachable_pub"
+)]
 mod proxy;
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "binary crate: shared items must be pub(crate), pub trips unreachable_pub"
+)]
 mod signals;
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "binary crate: shared items must be pub(crate), pub trips unreachable_pub"
+)]
 mod ssh;
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "binary crate: shared items must be pub(crate), pub trips unreachable_pub"
+)]
 mod ui;
 
 use std::io::{self, Stdout};
