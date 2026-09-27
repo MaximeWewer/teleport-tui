@@ -148,7 +148,7 @@ impl App {
 
     /// Log a failed root-profile restore and say which profile is stranded: every
     /// later `tsh`/`tctl` call reads the leaf until the user re-logs in.
-    fn report_restore_failed(&mut self, root: &ClusterName, error: &AppError) {
+    fn report_restore_failed(&mut self, root: &ClusterName, error: &DomainError) {
         self.report(error);
         self.status = Some(format!(
             "[{}] could not switch the profile back to {root}: {}",
@@ -180,7 +180,7 @@ impl App {
         seq: u64,
         tab: Tab,
         cluster: &ClusterName,
-        rows: Result<Vec<Vec<String>>, AppError>,
+        rows: Result<Vec<Vec<String>>, DomainError>,
     ) {
         match rows {
             Ok(cells) => {
@@ -240,7 +240,7 @@ impl App {
 
     /// Store a tab-data result into its vec, returning which tab it belongs to
     /// and the load outcome (row count or error). No UI side effects.
-    fn store_tab_result(&mut self, result: JobResult) -> (Tab, Result<usize, AppError>) {
+    fn store_tab_result(&mut self, result: JobResult) -> (Tab, Result<usize, DomainError>) {
         match result {
             JobResult::Nodes(r) => (Tab::Ssh, r.map(|v| set_vec(&mut self.nodes, v))),
             JobResult::Kube(r) => (Tab::Kube, r.map(|v| set_vec(&mut self.kube, v))),

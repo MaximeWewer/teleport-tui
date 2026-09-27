@@ -7,7 +7,6 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use application::command as cmd;
-use application::error::AppError;
 use application::use_case::{
     AddUser, GenerateToken, GetStatus, ListApps, ListBots, ListClusters, ListDatabases,
     ListInstances, ListKube, ListMfaDevices, ListNodes, ListRecordings, ListRequests, ListRoles,

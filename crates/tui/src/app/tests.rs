@@ -903,8 +903,7 @@ fn aggregate_error_renders_an_error_row_without_caching_it() {
             cluster: cn("leaf.example"),
             rows: Err(DomainError::ClusterOffline {
                 cluster: "leaf.example".to_owned(),
-            }
-            .into()),
+            }),
         },
     );
     // Shown like the admin path's error row, not silently dropped...
@@ -929,8 +928,7 @@ fn app_with_error_row(tab: Tab) -> App {
             cluster: cn("leaf.example"),
             rows: Err(DomainError::ClusterOffline {
                 cluster: "leaf.example".to_owned(),
-            }
-            .into()),
+            }),
         },
     );
     assert!(app.agg_rows[0].error);

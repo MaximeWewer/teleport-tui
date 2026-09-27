@@ -1,10 +1,13 @@
 //! Use cases - one type per business intention. Each holds a port (injected as
 //! a trait object) and orchestrates the domain. No business rules, no I/O here.
+//! Failures are the domain's own [`DomainError`] vocabulary: this layer adds no
+//! error cases of its own, so it does not wrap them.
 
 use domain::admin::{
     AdminRole, AdminUser, Bot, GeneratedToken, Instance, InviteLink, ProvisionToken,
 };
 use domain::cluster::{ClusterContext, ClusterTopology};
+use domain::error::DomainError;
 use domain::mfa::MfaDevice;
 use domain::node::SshNode;
 use domain::port::{
@@ -17,8 +20,6 @@ use domain::request::AccessRequest;
 use domain::resource::{App, Database, KubeCluster};
 use domain::session::ActiveSession;
 use domain::value::{ClusterName, ResourceName, RoleList, TokenTypes};
-
-use crate::error::AppError;
 
 /// List the root/leaf topology.
 #[derive(Debug)]
@@ -33,9 +34,9 @@ impl<'a> ListClusters<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self) -> Result<ClusterTopology, AppError> {
-        Ok(self.repo.list_clusters()?)
+    /// Propagates repository failures.
+    pub fn execute(&self) -> Result<ClusterTopology, DomainError> {
+        self.repo.list_clusters()
     }
 }
 
@@ -53,9 +54,9 @@ impl<'a> ListNodes<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<SshNode>, AppError> {
-        Ok(self.repo.list_nodes(ctx)?)
+    /// Propagates repository failures.
+    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<SshNode>, DomainError> {
+        self.repo.list_nodes(ctx)
     }
 }
 
@@ -72,9 +73,9 @@ impl<'a> ListKube<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<KubeCluster>, AppError> {
-        Ok(self.repo.list_kube(ctx)?)
+    /// Propagates repository failures.
+    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<KubeCluster>, DomainError> {
+        self.repo.list_kube(ctx)
     }
 }
 
@@ -91,9 +92,9 @@ impl<'a> ListDatabases<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<Database>, AppError> {
-        Ok(self.repo.list_databases(ctx)?)
+    /// Propagates repository failures.
+    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<Database>, DomainError> {
+        self.repo.list_databases(ctx)
     }
 }
 
@@ -110,9 +111,9 @@ impl<'a> ListApps<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<App>, AppError> {
-        Ok(self.repo.list_apps(ctx)?)
+    /// Propagates repository failures.
+    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<App>, DomainError> {
+        self.repo.list_apps(ctx)
     }
 }
 
@@ -129,9 +130,9 @@ impl<'a> ListUsers<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self) -> Result<Vec<AdminUser>, AppError> {
-        Ok(self.repo.list_users()?)
+    /// Propagates repository failures.
+    pub fn execute(&self) -> Result<Vec<AdminUser>, DomainError> {
+        self.repo.list_users()
     }
 }
 
@@ -149,9 +150,9 @@ impl<'a> GenerateToken<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, token_type: &TokenTypes) -> Result<GeneratedToken, AppError> {
-        Ok(self.repo.generate_token(token_type)?)
+    /// Propagates repository failures.
+    pub fn execute(&self, token_type: &TokenTypes) -> Result<GeneratedToken, DomainError> {
+        self.repo.generate_token(token_type)
     }
 }
 
@@ -170,9 +171,9 @@ impl<'a> ListTokens<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self) -> Result<Vec<ProvisionToken>, AppError> {
-        Ok(self.repo.list_tokens()?)
+    /// Propagates repository failures.
+    pub fn execute(&self) -> Result<Vec<ProvisionToken>, DomainError> {
+        self.repo.list_tokens()
     }
 }
 
@@ -190,9 +191,9 @@ impl<'a> RemoveToken<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, token: &str) -> Result<(), AppError> {
-        Ok(self.repo.remove_token(token)?)
+    /// Propagates repository failures.
+    pub fn execute(&self, token: &str) -> Result<(), DomainError> {
+        self.repo.remove_token(token)
     }
 }
 
@@ -210,9 +211,13 @@ impl<'a> AddUser<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, user: &ResourceName, roles: &RoleList) -> Result<InviteLink, AppError> {
-        Ok(self.repo.add_user(user, roles)?)
+    /// Propagates repository failures.
+    pub fn execute(
+        &self,
+        user: &ResourceName,
+        roles: &RoleList,
+    ) -> Result<InviteLink, DomainError> {
+        self.repo.add_user(user, roles)
     }
 }
 
@@ -230,9 +235,9 @@ impl<'a> ResetUser<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, user: &ResourceName) -> Result<InviteLink, AppError> {
-        Ok(self.repo.reset_user(user)?)
+    /// Propagates repository failures.
+    pub fn execute(&self, user: &ResourceName) -> Result<InviteLink, DomainError> {
+        self.repo.reset_user(user)
     }
 }
 
@@ -249,9 +254,9 @@ impl<'a> ListBots<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self) -> Result<Vec<Bot>, AppError> {
-        Ok(self.repo.list_bots()?)
+    /// Propagates repository failures.
+    pub fn execute(&self) -> Result<Vec<Bot>, DomainError> {
+        self.repo.list_bots()
     }
 }
 
@@ -268,9 +273,9 @@ impl<'a> ListInstances<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self) -> Result<Vec<Instance>, AppError> {
-        Ok(self.repo.list_instances()?)
+    /// Propagates repository failures.
+    pub fn execute(&self) -> Result<Vec<Instance>, DomainError> {
+        self.repo.list_instances()
     }
 }
 
@@ -287,9 +292,9 @@ impl<'a> ListRoles<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self) -> Result<Vec<AdminRole>, AppError> {
-        Ok(self.repo.list_roles()?)
+    /// Propagates repository failures.
+    pub fn execute(&self) -> Result<Vec<AdminRole>, DomainError> {
+        self.repo.list_roles()
     }
 }
 
@@ -306,9 +311,9 @@ impl<'a> GetStatus<'a> {
     }
 
     /// # Errors
-    /// Propagates gateway failures as [`AppError`].
-    pub fn execute(&self) -> Result<Option<Profile>, AppError> {
-        Ok(self.gateway.status()?)
+    /// Propagates gateway failures.
+    pub fn execute(&self) -> Result<Option<Profile>, DomainError> {
+        self.gateway.status()
     }
 }
 
@@ -327,9 +332,9 @@ impl<'a> SelectCluster<'a> {
 
     /// # Errors
     /// Propagates gateway failures (`NotAuthenticated` = a fresh interactive
-    /// login is needed) as [`AppError`].
-    pub fn execute(&self, cluster: &ClusterName) -> Result<(), AppError> {
-        Ok(self.gateway.select_cluster(cluster)?)
+    /// login is needed) as [`DomainError`].
+    pub fn execute(&self, cluster: &ClusterName) -> Result<(), DomainError> {
+        self.gateway.select_cluster(cluster)
     }
 }
 
@@ -347,9 +352,9 @@ impl<'a> ProbeAdminRights<'a> {
     }
 
     /// # Errors
-    /// Propagates a probe that could not run as [`AppError`].
-    pub fn execute(&self) -> Result<bool, AppError> {
-        Ok(self.repo.can_admin()?)
+    /// Propagates a probe that could not run as [`DomainError`].
+    pub fn execute(&self) -> Result<bool, DomainError> {
+        self.repo.can_admin()
     }
 }
 
@@ -366,9 +371,9 @@ impl<'a> ListRecordings<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<SessionRecording>, AppError> {
-        Ok(self.repo.list_recordings(ctx)?)
+    /// Propagates repository failures.
+    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<SessionRecording>, DomainError> {
+        self.repo.list_recordings(ctx)
     }
 }
 
@@ -385,9 +390,9 @@ impl<'a> ListSessions<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<ActiveSession>, AppError> {
-        Ok(self.repo.list_sessions(ctx)?)
+    /// Propagates repository failures.
+    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<ActiveSession>, DomainError> {
+        self.repo.list_sessions(ctx)
     }
 }
 
@@ -404,9 +409,9 @@ impl<'a> ListMfaDevices<'a> {
     }
 
     /// # Errors
-    /// Propagates gateway failures as [`AppError`].
-    pub fn execute(&self) -> Result<Vec<MfaDevice>, AppError> {
-        Ok(self.gateway.list_mfa_devices()?)
+    /// Propagates gateway failures.
+    pub fn execute(&self) -> Result<Vec<MfaDevice>, DomainError> {
+        self.gateway.list_mfa_devices()
     }
 }
 
@@ -423,8 +428,8 @@ impl<'a> ListRequests<'a> {
     }
 
     /// # Errors
-    /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<AccessRequest>, AppError> {
-        Ok(self.repo.list_requests(ctx)?)
+    /// Propagates repository failures.
+    pub fn execute(&self, ctx: &ClusterContext) -> Result<Vec<AccessRequest>, DomainError> {
+        self.repo.list_requests(ctx)
     }
 }

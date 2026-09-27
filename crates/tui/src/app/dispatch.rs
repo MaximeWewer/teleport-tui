@@ -55,34 +55,34 @@ pub(super) enum Job {
 
 /// The result of a [`Job`], sent back to the UI thread.
 pub(super) enum JobResult {
-    Clusters(Result<ClusterTopology, AppError>),
-    Status(Result<Option<Profile>, AppError>),
-    Nodes(Result<Vec<SshNode>, AppError>),
-    Kube(Result<Vec<KubeCluster>, AppError>),
-    Db(Result<Vec<Database>, AppError>),
-    Apps(Result<Vec<AppResource>, AppError>),
-    Requests(Result<Vec<AccessRequest>, AppError>),
-    Recordings(Result<Vec<SessionRecording>, AppError>),
-    Users(Result<Vec<AdminUser>, AppError>),
-    Roles(Result<Vec<AdminRole>, AppError>),
-    Tokens(Result<Vec<ProvisionToken>, AppError>),
-    Bots(Result<Vec<Bot>, AppError>),
-    Instances(Result<Vec<Instance>, AppError>),
-    Mfa(Result<Vec<MfaDevice>, AppError>),
-    Sessions(Result<Vec<ActiveSession>, AppError>),
-    TokenRemoved(Result<(), AppError>),
-    Invite(Result<InviteLink, AppError>),
-    Token(Result<GeneratedToken, AppError>),
+    Clusters(Result<ClusterTopology, DomainError>),
+    Status(Result<Option<Profile>, DomainError>),
+    Nodes(Result<Vec<SshNode>, DomainError>),
+    Kube(Result<Vec<KubeCluster>, DomainError>),
+    Db(Result<Vec<Database>, DomainError>),
+    Apps(Result<Vec<AppResource>, DomainError>),
+    Requests(Result<Vec<AccessRequest>, DomainError>),
+    Recordings(Result<Vec<SessionRecording>, DomainError>),
+    Users(Result<Vec<AdminUser>, DomainError>),
+    Roles(Result<Vec<AdminRole>, DomainError>),
+    Tokens(Result<Vec<ProvisionToken>, DomainError>),
+    Bots(Result<Vec<Bot>, DomainError>),
+    Instances(Result<Vec<Instance>, DomainError>),
+    Mfa(Result<Vec<MfaDevice>, DomainError>),
+    Sessions(Result<Vec<ActiveSession>, DomainError>),
+    TokenRemoved(Result<(), DomainError>),
+    Invite(Result<InviteLink, DomainError>),
+    Token(Result<GeneratedToken, DomainError>),
     AdminAllowed(bool),
     /// The admin-rights probe could not run at all (spawn failure / timeout):
     /// reported, then treated as "no admin rights".
-    AdminProbeFailed(AppError),
+    AdminProbeFailed(DomainError),
     /// One cluster's slice of a concurrent (`tsh -c`) aggregate. Carries `tab` +
     /// `cluster` so it caches per-cluster even after the user navigates away.
     Aggregate {
         tab: Tab,
         cluster: ClusterName,
-        rows: Result<Vec<Vec<String>>, AppError>,
+        rows: Result<Vec<Vec<String>>, DomainError>,
     },
     /// One cluster's slice of a serial admin/recordings fan-out (its rows, or a
     /// login-required placeholder), already tagged. Streamed one per cluster;
@@ -97,7 +97,7 @@ pub(super) enum JobResult {
     /// instead of dropped: every later `tsh`/`tctl` call would read the leaf.
     RestoreFailed {
         root: ClusterName,
-        error: AppError,
+        error: DomainError,
     },
 }
 
@@ -156,7 +156,7 @@ fn run_job(repos: &Repositories, job: Job) -> JobResult {
 /// The error result of `job`, for when it cannot run at all (its cluster could
 /// not be selected). Keeps the job's own result variant so the UI applies it
 /// like any failed listing - never another cluster's rows under this label.
-fn failed_job(job: Job, e: AppError) -> JobResult {
+fn failed_job(job: Job, e: DomainError) -> JobResult {
     match job {
         Job::Clusters => JobResult::Clusters(Err(e)),
         Job::Status => JobResult::Status(Err(e)),
@@ -224,7 +224,7 @@ pub(super) fn run_scoped_if_latest(
 }
 
 /// Make `cluster` the active profile (`tsh login <cluster>`).
-fn select_cluster(repos: &Repositories, cluster: &ClusterName) -> Result<(), AppError> {
+fn select_cluster(repos: &Repositories, cluster: &ClusterName) -> Result<(), DomainError> {
     SelectCluster::new(repos.auth.as_ref()).execute(cluster)
 }
 
@@ -298,7 +298,7 @@ pub(super) fn agg_rows_of(cluster: &ClusterName, cells_list: Vec<Vec<String>>) -
 }
 
 /// A placeholder row carrying a cluster's listing error.
-pub(super) fn err_row(cluster: ClusterName, e: &AppError) -> AggRow {
+pub(super) fn err_row(cluster: ClusterName, e: &DomainError) -> AggRow {
     AggRow {
         cluster,
         cells: vec![format!("⚠ {}", e.message())],
@@ -311,12 +311,10 @@ pub(super) fn err_row(cluster: ClusterName, e: &AppError) -> AggRow {
 /// The placeholder for a cluster whose profile could not be selected: a
 /// login-required row (actionable with `L`) when only a fresh login can fix it,
 /// otherwise the real error (network, backend, …).
-fn select_failed_row(cluster: ClusterName, e: AppError) -> AggRow {
+fn select_failed_row(cluster: ClusterName, e: DomainError) -> AggRow {
     match e {
-        AppError::Domain(DomainError::NotAuthenticated | DomainError::CertExpired) => {
-            login_required_row(cluster)
-        }
-        e @ AppError::Domain(_) => err_row(cluster, &e),
+        DomainError::NotAuthenticated | DomainError::CertExpired => login_required_row(cluster),
+        e => err_row(cluster, &e),
     }
 }
 
@@ -332,7 +330,7 @@ fn login_required_row(cluster: ClusterName) -> AggRow {
 
 /// Display rows for an admin `tab` against the *current* profile (Recordings is
 /// handled separately in [`admin_cluster_rows`] because it also carries a sid).
-fn admin_rows(repos: &Repositories, tab: Tab) -> Result<Vec<Vec<String>>, AppError> {
+fn admin_rows(repos: &Repositories, tab: Tab) -> Result<Vec<Vec<String>>, DomainError> {
     fn rows<T: Resource>(items: Vec<T>) -> Vec<Vec<String>> {
         items.into_iter().map(|it| it.row()).collect()
     }
@@ -351,7 +349,7 @@ fn aggregate_rows(
     repos: &Repositories,
     tab: Tab,
     ctx: &ClusterContext,
-) -> Result<Vec<Vec<String>>, AppError> {
+) -> Result<Vec<Vec<String>>, DomainError> {
     fn rows<T: Resource>(items: Vec<T>) -> Vec<Vec<String>> {
         items.into_iter().map(|it| it.row()).collect()
     }
