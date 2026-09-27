@@ -1,10 +1,16 @@
 //! Frame chrome: the tab bar, the top status/profile line, and the bottom
 //! footer/hints. Rendered around the body by [`super::render`].
 //!
-//! Split out of `ui`; imports and shared render helpers arrive via `super::*`.
+//! Split out of `ui`.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use domain::cluster::{ClusterContext, ClusterKind, ClusterStatus};
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph};
+
+use crate::app::{App, Mode, Tab};
 
 pub(super) fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
     // Only show tabs the installed `tsh` supports (and admin tabs only with

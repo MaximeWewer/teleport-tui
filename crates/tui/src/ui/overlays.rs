@@ -1,10 +1,17 @@
 //! Popup overlays: pickers, confirmations, one-time secret views, MFA/session
 //! lists, and the help screen - drawn centred over the frame.
 //!
-//! Split out of `ui`; imports and shared render helpers arrive via `super::*`.
+//! Split out of `ui`.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use domain::cluster::ClusterStatus;
+use ratatui::Frame;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
+
+use super::centered;
+use super::chrome::cluster_label;
+use crate::app::{App, Mode, Tab};
 
 pub(super) fn render_tool_picker(frame: &mut Frame, app: &mut App) {
     let items: Vec<ListItem> = app

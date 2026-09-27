@@ -1,10 +1,15 @@
 //! Modal form/prompt rendering (login, proxy, db-user, app-port, settings,
 //! scp, kube-exec, add-user) and their shared line/label helpers.
 //!
-//! Split out of `ui`; imports and shared render helpers arrive via `super::*`.
+//! Split out of `ui`.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use ratatui::Frame;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Clear, Paragraph};
+
+use super::centered;
+use crate::app::App;
 
 /// One editable form row: (label, current value, is-focused, hint).
 type FormRow<'a> = (&'a str, String, bool, &'a str);

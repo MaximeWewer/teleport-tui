@@ -1,29 +1,27 @@
 //! Rendering (the "view"). Reads `App` state; never mutates business data.
 
-use domain::cluster::{ClusterContext, ClusterKind, ClusterStatus};
-use domain::resource::Resource;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Row, Table};
 
-use crate::app::{App, Mode, Tab};
+use crate::app::{App, Mode};
 
 mod body;
 mod chrome;
 mod forms;
 mod overlays;
-// Bring the child render fns into scope for the `render` dispatcher below, and —
-// since the children `use super::*` - for cross-module calls between them.
-#[allow(clippy::wildcard_imports)]
-use body::*;
-#[allow(clippy::wildcard_imports)]
-use chrome::*;
-#[allow(clippy::wildcard_imports)]
-use forms::*;
-#[allow(clippy::wildcard_imports)]
-use overlays::*;
+
+use body::render_body;
+use chrome::{render_footer, render_status, render_tabs};
+use forms::{
+    render_add_user, render_app_port, render_db_user, render_kube_exec, render_login_form,
+    render_proxy, render_scp, render_settings, render_ssh_options,
+};
+use overlays::{
+    render_confirm_logout, render_confirm_mfa_rm, render_confirm_token_rm,
+    render_confirm_user_reset, render_create, render_detail, render_forwards, render_help,
+    render_invite, render_login, render_mfa, render_picker, render_sessions, render_token,
+    render_token_result, render_tool_picker, render_user_picker,
+};
 
 pub(crate) fn render(frame: &mut Frame, app: &mut App) {
     let [tabs_area, status_area, body_area, footer_area] = Layout::vertical([

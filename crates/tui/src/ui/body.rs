@@ -1,11 +1,15 @@
 //! The main content area: the per-tab resource table and the all-clusters
 //! aggregate table, with their column sizing.
 //!
-//! Split out of `ui`; imports and shared render helpers arrive via `super::*`.
+//! Split out of `ui`.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
-use ratatui::widgets::{HighlightSpacing, TableState};
+use domain::resource::Resource;
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::{Block, Borders, HighlightSpacing, Row, Table, TableState};
+
+use crate::app::{App, Tab};
 
 pub(super) fn render_body(frame: &mut Frame, app: &mut App, area: Rect) {
     if app.aggregating() {
