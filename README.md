@@ -1,7 +1,7 @@
 # teleport-tui
 
 **One keyboard-driven dashboard over all your Teleport resources.** Browse, search and
-connect to SSH nodes, Kubernetes clusters, databases and apps - across every cluster —
+connect to SSH nodes, Kubernetes clusters, databases and apps - across every cluster 
 without leaving the terminal or remembering a single `tsh` flag.
 
 `teleport-tui` is a fast Rust + [ratatui](https://github.com/ratatui/ratatui) front-end
