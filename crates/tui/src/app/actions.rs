@@ -96,11 +96,15 @@ impl App {
     /// `config.toml`. Text fields reuse the strict login/path validators.
     pub(super) fn submit_settings(&mut self) -> Outcome {
         let f = self.settings_form.clone();
-        for value in [&f.ssh_login, &f.kube_user, &f.db_user, &f.proxy, &f.user] {
-            if !value.is_empty() && !valid_user(value) {
-                self.report(&DomainError::InvalidValue { field: "settings" });
-                return Outcome::Continue;
+        let valid = parse_opt_field::<Login>(&f.ssh_login, "settings").and_then(|_| {
+            for value in [&f.kube_user, &f.db_user, &f.proxy, &f.user] {
+                parse_opt_field::<Identifier>(value, "settings")?;
             }
+            Ok(())
+        });
+        if let Err(e) = valid {
+            self.report(&e);
+            return Outcome::Continue;
         }
         // Helper: empty string → None (key omitted from the file).
         let opt = |s: &str| (!s.trim().is_empty()).then(|| s.trim().to_owned());
@@ -152,12 +156,15 @@ impl App {
         let f = self.login_form.clone();
         // Only the free-text fields can carry bad input; auth/mfa come from
         // fixed dropdowns and are always valid.
-        for value in [&f.proxy, &f.user] {
-            if !value.is_empty() && !valid_user(value) {
-                self.report(&DomainError::InvalidValue { field: "login" });
+        let parsed = parse_opt_field::<Identifier>(&f.proxy, "login")
+            .and_then(|proxy| Ok((proxy, parse_opt_field::<Identifier>(&f.user, "login")?)));
+        let (proxy, user) = match parsed {
+            Ok(v) => v,
+            Err(e) => {
+                self.report(&e);
                 return Outcome::Continue;
             }
-        }
+        };
         self.mode = Mode::Normal;
         self.last_was_auth = true;
         // A leaf re-login (from `L` on a login-required row): restore root before
@@ -172,7 +179,7 @@ impl App {
         }
         let auth = f.auth_str();
         let mfa = f.mfa_str();
-        let args = cmd::login(&f.proxy, &f.user, auth, mfa);
+        let args = cmd::login(proxy.as_ref(), user.as_ref(), auth, mfa);
         let target = if f.proxy.is_empty() {
             "Teleport".to_owned()
         } else {
@@ -198,24 +205,14 @@ impl App {
         if self.tab != Tab::Ssh {
             return;
         }
-        let Some(idx) = self.selected_index() else {
-            return;
-        };
         // Resolve (cluster, host) from the aggregate row or the scoped node list,
         // so scp targets the node's own cluster even in all-clusters mode.
-        let resolved = if self.aggregate {
-            self.agg_target(idx)
-        } else {
-            self.cluster_arg()
-                .zip(self.nodes.get(idx).map(|n| n.hostname.to_string()))
-        };
-        let Some((cluster, host)) = resolved else {
+        let Some(target) = self.node_target() else {
             return;
         };
         let login = self.profile_logins().into_iter().next().unwrap_or_default();
         self.scp_form = ScpForm {
-            host,
-            cluster,
+            target: Some(target),
             download: true,
             login,
             ..ScpForm::default()
@@ -230,24 +227,14 @@ impl App {
         if self.tab != Tab::Ssh {
             return;
         }
-        let Some(idx) = self.selected_index() else {
-            return;
-        };
         // Resolve (cluster, host) from the aggregate row or the scoped node list,
         // so the connection targets the node's own cluster even in all-clusters mode.
-        let resolved = if self.aggregate {
-            self.agg_target(idx)
-        } else {
-            self.cluster_arg()
-                .zip(self.nodes.get(idx).map(|n| n.hostname.to_string()))
-        };
-        let Some((cluster, host)) = resolved else {
+        let Some(target) = self.node_target() else {
             return;
         };
         let login = self.profile_logins().into_iter().next().unwrap_or_default();
         self.ssh_options_form = SshOptionsForm {
-            host,
-            cluster,
+            target: Some(target),
             login,
             ..SshOptionsForm::default()
         };
@@ -259,10 +246,17 @@ impl App {
     /// is just a normal connect.
     pub(super) fn submit_ssh_options(&mut self) -> Outcome {
         let f = self.ssh_options_form.clone();
-        if !f.login.is_empty() && !valid_user(&f.login) {
-            self.report(&DomainError::InvalidValue { field: "ssh_login" });
+        let Some(NodeTarget { cluster, host }) = f.target else {
+            self.mode = Mode::Normal;
             return Outcome::Continue;
-        }
+        };
+        let login = match parse_opt_field::<Login>(&f.login, "ssh_login") {
+            Ok(l) => l,
+            Err(e) => {
+                self.report(&e);
+                return Outcome::Continue;
+            }
+        };
         if !f.forward.is_empty() && !valid_forward(&f.forward) {
             self.report(&DomainError::InvalidValue {
                 field: "ssh_forward",
@@ -280,24 +274,31 @@ impl App {
         // and it joins the forwards list; everything else hands over the terminal.
         if f.tunnel_only && !f.forward.is_empty() && f.command.is_empty() {
             return Outcome::OpenForward {
-                cluster: f.cluster.clone(),
-                user: f.login.clone(),
-                host: f.host.clone(),
-                spec: f.forward.clone(),
-                label: format!("Starting forward {} · {}…", f.forward, f.host),
+                label: format!("Starting forward {} · {host}…", f.forward),
+                cluster,
+                user: login,
+                host,
+                spec: f.forward,
             };
         }
-        let args = cmd::ssh_full(&f.cluster, &f.login, &f.host, &f.forward, false, &f.command);
+        let args = cmd::ssh_full(
+            &cluster,
+            login.as_ref(),
+            &host,
+            &f.forward,
+            false,
+            &f.command,
+        );
         // A one-off command finishes on its own → pause on its output (RunCommand);
         // a plain connect opens an interactive shell the user ends themselves (Run).
         if f.command.is_empty() {
             Outcome::Run {
-                label: format!("Connecting to {}  ({})…", f.host, f.cluster),
+                label: format!("Connecting to {host}  ({cluster})…"),
                 args,
             }
         } else {
             Outcome::RunCommand {
-                label: format!("Running on {}  ({})…", f.host, f.cluster),
+                label: format!("Running on {host}  ({cluster})…"),
                 args,
             }
         }
@@ -307,19 +308,26 @@ impl App {
     /// to the terminal (tsh shows progress and may prompt for MFA there).
     pub(super) fn submit_scp(&mut self) -> Outcome {
         let f = self.scp_form.clone();
-        if !f.login.is_empty() && !valid_user(&f.login) {
-            self.report(&DomainError::InvalidValue { field: "scp_login" });
+        let Some(NodeTarget { cluster, host }) = f.target else {
+            self.mode = Mode::Normal;
             return Outcome::Continue;
-        }
+        };
+        let login = match parse_opt_field::<Login>(&f.login, "scp_login") {
+            Ok(l) => l,
+            Err(e) => {
+                self.report(&e);
+                return Outcome::Continue;
+            }
+        };
         if !valid_path(&f.remote) || !valid_path(&f.local) {
             self.report(&DomainError::InvalidValue { field: "scp_path" });
             return Outcome::Continue;
         }
         self.mode = Mode::Normal;
         let args = cmd::scp(
-            &f.cluster,
-            &f.login,
-            &f.host,
+            &cluster,
+            login.as_ref(),
+            &host,
             &f.remote,
             &f.local,
             f.download,
@@ -331,7 +339,7 @@ impl App {
             "Sending to"
         };
         Outcome::Run {
-            label: format!("{verb} {}  ({})…", f.host, f.cluster),
+            label: format!("{verb} {host}  ({cluster})…"),
             args,
         }
     }
@@ -356,11 +364,13 @@ impl App {
             return Outcome::Continue;
         };
         let f = self.kube_exec_form.clone();
-        let pod = f.pod.trim();
-        if !valid_user(pod) {
-            self.report(&DomainError::InvalidValue { field: "kube_pod" });
-            return Outcome::Continue;
-        }
+        let pod = match parse_field::<Identifier>(f.pod.trim(), "kube_pod") {
+            Ok(p) => p,
+            Err(e) => {
+                self.report(&e);
+                return Outcome::Continue;
+            }
+        };
         let command: Vec<String> = f.command.split_whitespace().map(str::to_owned).collect();
         if command.is_empty() {
             self.report(&DomainError::InvalidValue {
@@ -368,21 +378,22 @@ impl App {
             });
             return Outcome::Continue;
         }
-        let container = f.container.trim();
-        let namespace = f.namespace.trim();
-        if (!container.is_empty() && !valid_user(container))
-            || (!namespace.is_empty() && !valid_user(namespace))
-        {
-            self.report(&DomainError::InvalidValue { field: "kube_exec" });
-            return Outcome::Continue;
-        }
+        let scope = parse_opt_field::<Identifier>(&f.container, "kube_exec")
+            .and_then(|c| Ok((c, parse_opt_field::<Identifier>(&f.namespace, "kube_exec")?)));
+        let (container, namespace) = match scope {
+            Ok(v) => v,
+            Err(e) => {
+                self.report(&e);
+                return Outcome::Continue;
+            }
+        };
         self.mode = Mode::Normal;
-        let exec = cmd::kube_exec(pod, &command, container, namespace);
+        let exec = cmd::kube_exec(&pod, &command, container.as_ref(), namespace.as_ref());
         Outcome::KubeExec {
             cluster,
-            kube: kube.clone(),
-            exec,
             label: format!("exec in {pod} on {kube}…"),
+            kube,
+            exec,
         }
     }
 
@@ -395,10 +406,25 @@ impl App {
         }
     }
 
-    fn cluster_arg(&self) -> Option<String> {
-        self.topology
-            .as_ref()
-            .map(|t| t.selected().name.to_string())
+    /// The cluster selected in the picker (scoped views act on it).
+    fn selected_cluster(&self) -> Option<ClusterName> {
+        self.topology.as_ref().map(|t| t.selected().name.clone())
+    }
+
+    /// `(cluster, host)` of the highlighted SSH node, from the aggregate row or
+    /// the scoped node list. `None` off the SSH tab or with nothing selected.
+    fn node_target(&mut self) -> Option<NodeTarget> {
+        if self.tab != Tab::Ssh {
+            return None;
+        }
+        let idx = self.selected_index()?;
+        let (cluster, host) = if self.aggregate {
+            self.agg_target::<Hostname>(idx)?
+        } else {
+            let host = self.nodes.get(idx)?.hostname.clone();
+            (self.selected_cluster()?, host)
+        };
+        Some(NodeTarget { cluster, host })
     }
 
     pub(super) fn activate(&mut self) -> Outcome {
@@ -419,8 +445,15 @@ impl App {
             } else {
                 self.recordings.get(idx).map(|r| r.sid.clone())
             };
-            let Some(sid) = sid.filter(|s| !s.is_empty() && !s.starts_with('-')) else {
+            let Some(sid) = sid else {
                 return Outcome::Continue;
+            };
+            let sid = match SessionId::try_from(sid) {
+                Ok(sid) => sid,
+                Err(e) => {
+                    self.report(&e);
+                    return Outcome::Continue;
+                }
             };
             return Outcome::PlayRecording {
                 label: format!("Replaying session {sid}…"),
@@ -432,33 +465,7 @@ impl App {
         if self.tab.is_admin() {
             return self.show_detail(idx);
         }
-        // Source (cluster, name) from the aggregate row (connect directly even in
-        // all-clusters mode) or from the scoped vec + selected cluster.
-        let resolved = if self.aggregate && !self.tab.is_admin() {
-            self.agg_target(idx)
-        } else {
-            let cluster = self.cluster_arg();
-            let name = match self.tab {
-                Tab::Ssh => self.nodes.get(idx).map(|n| n.hostname.to_string()),
-                Tab::Kube => self.kube.get(idx).map(|k| k.name.to_string()),
-                Tab::Db => self.dbs.get(idx).map(|d| d.name.to_string()),
-                Tab::Apps => self.apps.get(idx).map(|a| a.name.to_string()),
-                Tab::Requests => self.requests.get(idx).map(|r| r.id.to_string()),
-                Tab::Users
-                | Tab::Roles
-                | Tab::Tokens
-                | Tab::Bots
-                | Tab::Inventory
-                | Tab::Recordings => {
-                    return Outcome::Continue; // read-only / handled above
-                }
-            };
-            cluster.zip(name)
-        };
-        let Some((cluster, name)) = resolved else {
-            return Outcome::Continue;
-        };
-        self.connect_resource(cluster, name)
+        self.connect_resource()
     }
 
     /// Open the read-only detail popup for the selected admin row: every field,
@@ -501,44 +508,43 @@ impl App {
         Outcome::Continue
     }
 
-    /// Start the tab's connect action for `name` on `cluster`. Works the same in
-    /// scoped and all-clusters views.
-    fn connect_resource(&mut self, cluster: String, name: String) -> Outcome {
+    /// Start the tab's connect action for the highlighted row, sourcing (cluster,
+    /// name) from the aggregate row (connect directly even in all-clusters mode)
+    /// or from the scoped vec + selected cluster.
+    fn connect_resource(&mut self) -> Outcome {
         match self.tab {
             Tab::Ssh => {
+                let Some(NodeTarget { cluster, host }) = self.node_target() else {
+                    return Outcome::Continue;
+                };
                 // A configured default login connects directly (no picker).
-                if let Some(login) = self.default_login.clone().filter(|l| valid_user(l)) {
-                    return self.connect_with_user(
-                        PendingConnect::Ssh {
-                            cluster,
-                            host: name,
-                        },
-                        &login,
-                    );
+                if let Some(login) = self.default_login_typed() {
+                    self.mode = Mode::Normal;
+                    return Self::connect_ssh(&cluster, &host, &login);
                 }
                 let users = self.profile_logins();
-                self.offer_connect(
-                    PendingConnect::Ssh {
-                        cluster,
-                        host: name,
-                    },
-                    users,
-                )
+                self.offer_connect(PendingConnect::Ssh { cluster, host }, users)
             }
             Tab::Kube => {
+                let Some((cluster, name)) = self.resource_target() else {
+                    return Outcome::Continue;
+                };
                 // A configured default kube user skips the picker (→ tool choice).
-                if let Some(user) = self.default_kube_user.clone().filter(|u| valid_user(u)) {
+                if let Some(user) = typed_default::<Identifier>(self.default_kube_user.as_deref()) {
                     return self.offer_kube_tool(cluster, name, Some(user));
                 }
                 let users = self.profile_kube_users();
                 self.offer_connect(PendingConnect::Kube { cluster, name }, users)
             }
             Tab::Db => {
+                let Some((cluster, name)) = self.resource_target() else {
+                    return Outcome::Continue;
+                };
                 // A configured default db user connects directly; else prompt.
-                if let Some(user) = self.default_db_user.clone().filter(|u| valid_user(u)) {
+                if let Some(user) = typed_default::<Identifier>(self.default_db_user.as_deref()) {
                     return Outcome::Run {
                         label: format!("Connecting to database {name} as {user}…"),
-                        args: cmd::db_connect(&cluster, &name, &user),
+                        args: cmd::db_connect(&cluster, &name, Some(&user)),
                     };
                 }
                 self.input.clear();
@@ -546,15 +552,23 @@ impl App {
                 Outcome::Continue
             }
             Tab::Apps => {
+                let Some((cluster, name)) = self.resource_target() else {
+                    return Outcome::Continue;
+                };
                 // Prompt for a local proxy port (blank = random free port).
                 self.input.clear();
                 self.mode = Mode::AppPort { cluster, name };
                 Outcome::Continue
             }
-            Tab::Requests => Outcome::Run {
-                label: format!("Showing access request {name}…"),
-                args: cmd::request_show(&cluster, &name),
-            },
+            Tab::Requests => {
+                let Some((cluster, id, _)) = self.request_target() else {
+                    return Outcome::Continue;
+                };
+                Outcome::Run {
+                    label: format!("Showing access request {id}…"),
+                    args: cmd::request_show(&cluster, &id),
+                }
+            }
             Tab::Users
             | Tab::Roles
             | Tab::Tokens
@@ -562,6 +576,11 @@ impl App {
             | Tab::Inventory
             | Tab::Recordings => Outcome::Continue,
         }
+    }
+
+    /// The configured default SSH login, if set and a valid [`Login`].
+    fn default_login_typed(&self) -> Option<Login> {
+        typed_default(self.default_login.as_deref())
     }
 
     fn profile_logins(&self) -> Vec<String> {
@@ -583,7 +602,19 @@ impl App {
     /// (free-text login for SSH, no `--as` for kube).
     fn offer_connect(&mut self, pending: PendingConnect, users: Vec<String>) -> Outcome {
         let is_ssh = matches!(pending, PendingConnect::Ssh { .. });
-        let users: Vec<String> = users.into_iter().filter(|u| valid_user(u)).collect();
+        // Keep only candidates the connection can use: SSH logins must be valid
+        // `Login`s (this also drops tsh's internal `-teleport-*` placeholders),
+        // kube users valid `Identifier`s.
+        let users: Vec<String> = users
+            .into_iter()
+            .filter(|u| {
+                if is_ssh {
+                    Login::try_from(u.as_str()).is_ok()
+                } else {
+                    Identifier::try_from(u.as_str()).is_ok()
+                }
+            })
+            .collect();
         match users.len() {
             0 if is_ssh => {
                 // No known logins: ask for one (the pending connection rides along).
@@ -604,23 +635,37 @@ impl App {
         }
     }
 
+    /// Launch `pending` as `user`, parsed as the connection's own newtype (an
+    /// SSH [`Login`] or a kube [`Identifier`]).
     pub(super) fn connect_with_user(&mut self, pending: PendingConnect, user: &str) -> Outcome {
-        if !valid_user(user) {
-            self.report(&DomainError::InvalidValue { field: "user" });
-            return Outcome::Continue;
-        }
         match pending {
-            PendingConnect::Ssh { cluster, host } => {
-                self.mode = Mode::Normal;
-                Outcome::Run {
-                    label: format!("Connecting to {user}@{host}  ({cluster})…"),
-                    args: cmd::ssh(&cluster, user, &host),
+            PendingConnect::Ssh { cluster, host } => match parse_field::<Login>(user, "user") {
+                Ok(login) => {
+                    self.mode = Mode::Normal;
+                    Self::connect_ssh(&cluster, &host, &login)
                 }
-            }
+                Err(e) => {
+                    self.report(&e);
+                    Outcome::Continue
+                }
+            },
             // Kubernetes: pick a launcher tool next (auto-proxy).
             PendingConnect::Kube { cluster, name } => {
-                self.offer_kube_tool(cluster, name, Some(user.to_owned()))
+                match parse_field::<Identifier>(user, "user") {
+                    Ok(user) => self.offer_kube_tool(cluster, name, Some(user)),
+                    Err(e) => {
+                        self.report(&e);
+                        Outcome::Continue
+                    }
+                }
             }
+        }
+    }
+
+    fn connect_ssh(cluster: &ClusterName, host: &Hostname, login: &Login) -> Outcome {
+        Outcome::Run {
+            label: format!("Connecting to {login}@{host}  ({cluster})…"),
+            args: cmd::ssh(cluster, login, host),
         }
     }
 
@@ -636,7 +681,12 @@ impl App {
 
     /// Offer the configured Kubernetes launchers: one tool → open directly;
     /// several → dropdown.
-    fn offer_kube_tool(&mut self, cluster: String, name: String, user: Option<String>) -> Outcome {
+    fn offer_kube_tool(
+        &mut self,
+        cluster: ClusterName,
+        name: ResourceName,
+        user: Option<Identifier>,
+    ) -> Outcome {
         let tools = if self.kube_tools.is_empty() {
             vec!["shell".to_owned()]
         } else {
@@ -644,7 +694,7 @@ impl App {
         };
         if let [tool] = tools.as_slice() {
             self.mode = Mode::Normal;
-            return Self::launch_kube(&cluster, &name, user.as_deref(), tool);
+            return Self::launch_kube(cluster, name, user, tool);
         }
         self.tool_choices = tools;
         self.tool_picker.select(Some(0));
@@ -660,15 +710,15 @@ impl App {
     /// open the chosen tool with `$KUBECONFIG` set. Done outside `--exec` so the
     /// proxy stays silent and the handed-over shell terminal isn't corrupted.
     pub(super) fn launch_kube(
-        cluster: &str,
-        name: &str,
-        user: Option<&str>,
+        cluster: ClusterName,
+        name: ResourceName,
+        user: Option<Identifier>,
         tool: &str,
     ) -> Outcome {
         Outcome::OpenKube {
-            kube: name.to_owned(),
-            cluster: cluster.to_owned(),
-            user: user.map(ToOwned::to_owned),
+            kube: name,
+            cluster,
+            user,
             tool: tool.to_owned(),
         }
     }
@@ -679,21 +729,21 @@ impl App {
         let Mode::DbUser { cluster, name } = std::mem::replace(&mut self.mode, Mode::Normal) else {
             return Outcome::Continue;
         };
-        let user = self.input.trim().to_owned();
+        let user = parse_opt_field::<Identifier>(&self.input, "db_user");
         self.input.clear();
-        if user.is_empty() {
-            return Outcome::Run {
+        match user {
+            Ok(None) => Outcome::Run {
                 label: format!("Connecting to database {name}…"),
-                args: cmd::db_connect(&cluster, &name, ""),
-            };
-        }
-        if !valid_user(&user) {
-            self.report(&DomainError::InvalidValue { field: "db_user" });
-            return Outcome::Continue;
-        }
-        Outcome::Run {
-            label: format!("Connecting to database {name} as {user}…"),
-            args: cmd::db_connect(&cluster, &name, &user),
+                args: cmd::db_connect(&cluster, &name, None),
+            },
+            Ok(Some(user)) => Outcome::Run {
+                label: format!("Connecting to database {name} as {user}…"),
+                args: cmd::db_connect(&cluster, &name, Some(&user)),
+            },
+            Err(e) => {
+                self.report(&e);
+                Outcome::Continue
+            }
         }
     }
 
@@ -704,37 +754,34 @@ impl App {
         if self.tab != Tab::Db {
             return Outcome::Continue;
         }
-        let Some(idx) = self.selected_index() else {
-            return Outcome::Continue;
-        };
-        let resolved = if self.aggregate {
-            self.agg_target(idx)
-        } else {
-            self.cluster_arg()
-                .zip(self.dbs.get(idx).map(|d| d.name.to_string()))
-        };
-        let Some((cluster, name)) = resolved else {
+        let Some((cluster, name)) = self.resource_target() else {
             return Outcome::Continue;
         };
         self.status = Some(format!("starting db proxy for {name}…"));
         Outcome::OpenDbProxy { name, cluster }
     }
 
-    /// `(cluster, name)` from an aggregate row's first cell, **validated as safe
-    /// argv positionals**. In all-clusters mode these are reconstructed from
-    /// display cells rather than the domain newtypes that produced them, so
-    /// re-apply the empty / leading-`-` guard (argument-injection) the newtypes
-    /// enforce before the values can reach a `tsh`/`tctl` argument slot.
-    fn agg_target(&mut self, idx: usize) -> Option<(String, String)> {
+    /// `(cluster, name)` from an aggregate row's first cell. In all-clusters
+    /// mode the name is a display cell rather than the domain newtype that
+    /// produced it, so it is re-parsed as `T` (the tab's own newtype) before it
+    /// can reach a `tsh` argument slot; a value that fails is reported.
+    fn agg_target<T>(&mut self, idx: usize) -> Option<(ClusterName, T)>
+    where
+        T: for<'a> TryFrom<&'a str, Error = DomainError>,
+    {
         if !self.agg_row_actionable(idx) {
             return None;
         }
         let r = self.agg_rows.get(idx)?;
-        let name = r.cells.first()?;
-        if name.is_empty() || name.starts_with('-') {
-            return None;
+        let parsed = T::try_from(r.cells.first()?.as_str());
+        let cluster = r.cluster.clone();
+        match parsed {
+            Ok(name) => Some((cluster, name)),
+            Err(e) => {
+                self.report(&e);
+                None
+            }
         }
-        Some((r.cluster.to_string(), name.clone()))
     }
 
     /// Whether the aggregate row at `idx` is a real resource. A placeholder (a
@@ -756,16 +803,16 @@ impl App {
     /// (cluster, name) of the highlighted Db/Apps row - from the aggregate row in
     /// all-clusters mode, else the scoped vec + selected cluster. Used by the
     /// cert-lifecycle actions (`l`/`u`), which are gated to those tabs.
-    fn resource_target(&mut self) -> Option<(String, String)> {
+    fn resource_target(&mut self) -> Option<(ClusterName, ResourceName)> {
         let idx = self.selected_index()?;
         if self.aggregating() {
             return self.agg_target(idx);
         }
-        let cluster = self.cluster_arg()?;
+        let cluster = self.selected_cluster()?;
         let name = match self.tab {
-            Tab::Db => self.dbs.get(idx).map(|d| d.name.to_string())?,
-            Tab::Apps => self.apps.get(idx).map(|a| a.name.to_string())?,
-            Tab::Kube => self.kube.get(idx).map(|k| k.name.to_string())?,
+            Tab::Db => self.dbs.get(idx).map(|d| d.name.clone())?,
+            Tab::Apps => self.apps.get(idx).map(|a| a.name.clone())?,
+            Tab::Kube => self.kube.get(idx).map(|k| k.name.clone())?,
             _ => return None,
         };
         Some((cluster, name))
@@ -777,14 +824,10 @@ impl App {
         let Some((cluster, name)) = self.resource_target() else {
             return Outcome::Continue;
         };
-        let db_user = self
-            .default_db_user
-            .clone()
-            .filter(|u| valid_user(u))
-            .unwrap_or_default();
+        let db_user = typed_default::<Identifier>(self.default_db_user.as_deref());
         Outcome::Run {
             label: format!("Logging in to database {name}…"),
-            args: cmd::db_login(&cluster, &name, &db_user),
+            args: cmd::db_login(&cluster, &name, db_user.as_ref()),
         }
     }
 
@@ -873,10 +916,10 @@ impl App {
     /// all-clusters mode the table shows aggregate rows, so the selection indexes
     /// those (not the scoped `requests` vec) and the row's own cluster applies;
     /// a placeholder row (listing error) yields nothing.
-    fn request_target(&mut self) -> Option<(String, String, bool)> {
+    fn request_target(&mut self) -> Option<(ClusterName, RequestId, bool)> {
         let idx = self.selected_index()?;
         if self.aggregating() {
-            let (cluster, id) = self.agg_target(idx)?;
+            let (cluster, id) = self.agg_target::<RequestId>(idx)?;
             let state_col = AccessRequest::columns()
                 .iter()
                 .position(|c| *c == "STATE")?;
@@ -890,8 +933,8 @@ impl App {
         let (id, pending) = self
             .requests
             .get(idx)
-            .map(|r| (r.id.to_string(), r.state.is_pending()))?;
-        Some((self.cluster_arg()?, id, pending))
+            .map(|r| (r.id.clone(), r.state.is_pending()))?;
+        Some((self.selected_cluster()?, id, pending))
     }
 
     /// Approve/deny the selected request (interactive, audited by Teleport).
@@ -931,14 +974,14 @@ impl App {
                 return Outcome::Continue;
             }
         };
-        let Some(cluster) = self.cluster_arg() else {
+        let Some(cluster) = self.selected_cluster() else {
             return Outcome::Continue;
         };
         self.mode = Mode::Normal;
         self.input.clear();
         Outcome::Run {
             label: format!("Creating access request for roles {roles}…"),
-            args: cmd::request_create(&cluster, roles.as_str()),
+            args: cmd::request_create(&cluster, &roles),
         }
     }
 
@@ -953,10 +996,18 @@ impl App {
             }
         };
         self.input.clear();
-        let user = login.to_string();
         let Mode::Login(pending) = std::mem::replace(&mut self.mode, Mode::Normal) else {
             return Outcome::Continue;
         };
-        self.connect_with_user(pending, &user)
+        self.connect_with_user(pending, login.as_str())
     }
+}
+
+/// A persisted default (free text from `config.toml`) as the newtype it feeds;
+/// `None` when unset or invalid, so the caller falls back to prompting.
+fn typed_default<T>(value: Option<&str>) -> Option<T>
+where
+    T: for<'a> TryFrom<&'a str>,
+{
+    value.and_then(|v| T::try_from(v).ok())
 }

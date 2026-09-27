@@ -40,6 +40,7 @@ use ratatui::crossterm::terminal::{
 use std::time::Duration;
 
 use domain::port::{AdminRepository, CapabilityProbe};
+use domain::value::{ClusterName, ResourceName};
 use infrastructure::capability::TshCapabilityProbe;
 use infrastructure::config::{Config, default_kube_tools};
 use infrastructure::logging::NdjsonLogger;
@@ -288,7 +289,7 @@ fn handle_key(terminal: &mut Tui, app: &mut App, key: KeyEvent) -> bool {
             thread::spawn(move || {
                 let result = proxy::open_app(&tsh, &name, &cluster, port);
                 let _ = tx.send(app::ProxyEvent::AppReady {
-                    name,
+                    name: name.to_string(),
                     kind: app::ProxyKind::App,
                     result,
                 });
@@ -302,7 +303,7 @@ fn handle_key(terminal: &mut Tui, app: &mut App, key: KeyEvent) -> bool {
                 // Random local port; the endpoint is shown in the overlay.
                 let result = proxy::open_db(&tsh, &name, &cluster, None);
                 let _ = tx.send(app::ProxyEvent::AppReady {
-                    name,
+                    name: name.to_string(),
                     kind: app::ProxyKind::Db,
                     result,
                 });
@@ -318,8 +319,12 @@ fn handle_key(terminal: &mut Tui, app: &mut App, key: KeyEvent) -> bool {
             let tx = app.proxy_sender();
             let tsh = app.tsh.clone();
             thread::spawn(move || {
-                let result = proxy::start_kube_proxy(&tsh, &kube, &cluster, user.as_deref());
-                let _ = tx.send(app::ProxyEvent::KubeReady { kube, tool, result });
+                let result = proxy::start_kube_proxy(&tsh, &kube, &cluster, user.as_ref());
+                let _ = tx.send(app::ProxyEvent::KubeReady {
+                    kube: kube.to_string(),
+                    tool,
+                    result,
+                });
             });
         }
         Outcome::OpenForward {
@@ -332,17 +337,15 @@ fn handle_key(terminal: &mut Tui, app: &mut App, key: KeyEvent) -> bool {
             app.note_connecting(&label);
             let tx = app.proxy_sender();
             let tsh = app.tsh.clone();
-            let target = if user.is_empty() {
-                host.clone()
-            } else {
-                format!("{user}@{host}")
-            };
+            let target = user
+                .as_ref()
+                .map_or_else(|| host.to_string(), |u| format!("{u}@{host}"));
             thread::spawn(move || {
-                let result = proxy::start_ssh_forward(&tsh, &cluster, &user, &host, &spec);
+                let result = proxy::start_ssh_forward(&tsh, &cluster, user.as_ref(), &host, &spec);
                 let _ = tx.send(app::ProxyEvent::ForwardReady {
                     spec,
                     target,
-                    cluster,
+                    cluster: cluster.to_string(),
                     result,
                 });
             });
@@ -377,8 +380,8 @@ fn handle_play(terminal: &mut Tui, app: &mut App, args: &[String], label: &str) 
 fn handle_kube_exec(
     terminal: &mut Tui,
     app: &mut App,
-    cluster: &str,
-    kube: &str,
+    cluster: &ClusterName,
+    kube: &ResourceName,
     exec: &[String],
     label: &str,
 ) {

@@ -329,7 +329,7 @@ pub(super) fn render_scp(frame: &mut Frame, app: &App) {
         ),
     ];
     let lines = form_lines(
-        &format!("Transfer files - {} ({})", f.host, f.cluster),
+        &format!("Transfer files - {}", target_label(f.target.as_ref())),
         &rows,
         f.field,
         &["Tab/↑↓ move · type or ←/→ to edit · Enter transfer · Esc cancel"],
@@ -376,7 +376,7 @@ pub(super) fn render_ssh_options(frame: &mut Frame, app: &App) {
         ),
     ];
     let lines = form_lines(
-        &format!("SSH options - {} ({})", f.host, f.cluster),
+        &format!("SSH options - {}", target_label(f.target.as_ref())),
         &rows,
         f.field,
         &["Tab/↑↓ move · type or ←/→ to edit · Enter connect · Esc cancel"],
@@ -452,4 +452,9 @@ pub(super) fn render_kube_exec(frame: &mut Frame, app: &App) {
         Paragraph::new(lines).block(Block::bordered().title(" Kube exec ")),
         area,
     );
+}
+
+/// `host (cluster)` for a form's node target (blank for the unset default).
+fn target_label(target: Option<&crate::forms::NodeTarget>) -> String {
+    target.map_or_else(String::new, |t| format!("{} ({})", t.host, t.cluster))
 }

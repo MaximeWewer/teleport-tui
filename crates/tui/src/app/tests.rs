@@ -372,8 +372,8 @@ fn apps_enter_requests_open_app() {
             cluster,
             port,
         } => {
-            assert_eq!(name, "argocd");
-            assert_eq!(cluster, "root.example");
+            assert_eq!(name.as_str(), "argocd");
+            assert_eq!(cluster.as_str(), "root.example");
             assert_eq!(port, Some(8080));
         }
         other => panic!("expected OpenApp, got {other:?}"),
@@ -454,9 +454,9 @@ fn kube_picks_user_then_tool_then_opens_auto_proxy() {
             user,
             tool,
         } => {
-            assert_eq!(kube, "k8s-prod");
-            assert_eq!(cluster, "root.example");
-            assert_eq!(user.as_deref(), Some("kube-admin"));
+            assert_eq!(kube.as_str(), "k8s-prod");
+            assert_eq!(cluster.as_str(), "root.example");
+            assert_eq!(user.as_ref().map(Identifier::as_str), Some("kube-admin"));
             assert_eq!(tool, "k9s");
         }
         other => panic!("expected OpenKube, got {other:?}"),
@@ -1366,8 +1366,9 @@ fn scp_download_builds_remote_to_local() {
     assert_eq!(app.tab, Tab::Ssh);
     app.on_key(press('s'));
     assert_eq!(app.mode, Mode::Scp);
-    assert_eq!(app.scp_form.host, "web-01");
-    assert_eq!(app.scp_form.cluster, "root.example");
+    let target = app.scp_form.target.clone().unwrap();
+    assert_eq!(target.host.as_str(), "web-01");
+    assert_eq!(target.cluster.as_str(), "root.example");
     assert_eq!(app.scp_form.login, "root"); // first profile login
     assert!(app.scp_form.download);
     // Tab to Remote (field 2), type the node path.
@@ -1401,8 +1402,9 @@ fn ssh_options_tunnel_goes_to_background_forward() {
     let mut app = test_app(); // SSH tab, row 0 = web-01, login "root"
     app.on_key(press('o'));
     assert_eq!(app.mode, Mode::SshOptions);
-    assert_eq!(app.ssh_options_form.host, "web-01");
-    assert_eq!(app.ssh_options_form.cluster, "root.example");
+    let target = app.ssh_options_form.target.clone().unwrap();
+    assert_eq!(target.host.as_str(), "web-01");
+    assert_eq!(target.cluster.as_str(), "root.example");
     assert_eq!(app.ssh_options_form.login, "root");
     app.on_key(KeyEvent::from(KeyCode::Tab)); // login → forward
     for c in "8080:localhost:80".chars() {
@@ -1420,9 +1422,9 @@ fn ssh_options_tunnel_goes_to_background_forward() {
             spec,
             ..
         } => {
-            assert_eq!(cluster, "root.example");
-            assert_eq!(user, "root");
-            assert_eq!(host, "web-01");
+            assert_eq!(cluster.as_str(), "root.example");
+            assert_eq!(user.as_ref().map(Login::as_str), Some("root"));
+            assert_eq!(host.as_str(), "web-01");
             assert_eq!(spec, "8080:localhost:80");
         }
         other => panic!("expected OpenForward, got {other:?}"),
@@ -1714,8 +1716,8 @@ fn db_proxy_key_returns_open_db_proxy() {
     app.on_key(press('3')); // Db tab (pg-main selected)
     match app.on_key(press('P')) {
         Outcome::OpenDbProxy { name, cluster } => {
-            assert_eq!(name, "pg-main");
-            assert_eq!(cluster, "root.example");
+            assert_eq!(name.as_str(), "pg-main");
+            assert_eq!(cluster.as_str(), "root.example");
         }
         other => panic!("expected OpenDbProxy, got {other:?}"),
     }
@@ -1773,8 +1775,8 @@ fn kube_exec_form_emits_two_step_exec() {
             exec,
             ..
         } => {
-            assert_eq!(cluster, "root.example");
-            assert_eq!(kube, "k8s-prod");
+            assert_eq!(cluster.as_str(), "root.example");
+            assert_eq!(kube.as_str(), "k8s-prod");
             assert_eq!(exec, vec!["kube", "exec", "--", "api-0", "sh"]);
         }
         other => panic!("expected KubeExec, got {other:?}"),

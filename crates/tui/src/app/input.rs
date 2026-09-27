@@ -558,7 +558,7 @@ impl App {
                     else {
                         return Outcome::Continue;
                     };
-                    return Self::launch_kube(&cluster, &name, user.as_deref(), &tool);
+                    return Self::launch_kube(cluster, name, user, &tool);
                 }
             }
             _ => {}
@@ -753,7 +753,10 @@ impl App {
             // Remove the selected device (confirm first).
             KeyCode::Char('d') => {
                 if let Some(name) = self.mfa_devices.get(self.mfa_sel).map(|d| d.name.clone()) {
-                    self.mode = Mode::ConfirmMfaRm(name);
+                    match DeviceName::try_from(name) {
+                        Ok(name) => self.mode = Mode::ConfirmMfaRm(name),
+                        Err(e) => self.report(&e),
+                    }
                 }
             }
             _ => {}
@@ -777,12 +780,6 @@ impl App {
         let Mode::ConfirmMfaRm(name) = std::mem::replace(&mut self.mode, Mode::Normal) else {
             return Outcome::Continue;
         };
-        if name.is_empty() || name.starts_with('-') {
-            self.report(&DomainError::InvalidValue {
-                field: "mfa_device",
-            });
-            return Outcome::Continue;
-        }
         Outcome::Run {
             label: format!("Removing MFA device {name}…"),
             args: cmd::mfa_rm(&name),
@@ -806,8 +803,7 @@ impl App {
                 if let Some(id) = self
                     .sessions
                     .get(self.sessions_sel)
-                    .map(|s| s.id.clone())
-                    .filter(|s| !s.is_empty() && !s.starts_with('-'))
+                    .and_then(|s| SessionId::try_from(s.id.as_str()).ok())
                 {
                     self.sessions.clear();
                     self.mode = Mode::Normal;

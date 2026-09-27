@@ -17,8 +17,18 @@ fn is_safe_ident(s: &str, max: usize) -> bool {
         && !s.chars().any(|c| c.is_control() || c.is_whitespace())
 }
 
+/// Like [`is_safe_ident`] but for human-chosen labels that may hold spaces
+/// (e.g. an MFA device name): control characters and a leading `-` are still
+/// rejected, plain spaces are not.
+fn is_safe_label(s: &str, max: usize) -> bool {
+    !s.is_empty() && s.len() <= max && !s.starts_with('-') && !s.chars().any(char::is_control)
+}
+
 macro_rules! string_newtype {
     ($name:ident, $field:literal, $max:literal, $extra:expr) => {
+        string_newtype!($name, $field, $max, is_safe_ident, $extra);
+    };
+    ($name:ident, $field:literal, $max:literal, $base:path, $extra:expr) => {
         #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
         pub struct $name(String);
 
@@ -32,7 +42,7 @@ macro_rules! string_newtype {
             type Error = DomainError;
             fn try_from(value: String) -> Result<Self, Self::Error> {
                 let extra: fn(&str) -> bool = $extra;
-                if is_safe_ident(&value, $max) && extra(&value) {
+                if $base(&value, $max) && extra(&value) {
                     Ok(Self(value))
                 } else {
                     Err(DomainError::InvalidValue { field: $field })
@@ -104,6 +114,21 @@ string_newtype!(RequestId, "request_id", 64, |s: &str| {
     s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 });
 
+// Session id (UUID-like) of a live or recorded session (`tsh join`/`tsh play`).
+string_newtype!(SessionId, "session_id", 64, |s: &str| {
+    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+});
+
+// A free-form identifier that becomes a single argv value: a Teleport user or
+// proxy address (`tsh login`), a database user, a Kubernetes user/pod/
+// container/namespace. No charset beyond `is_safe_ident` (kube users may hold
+// `:`, `@`, `/`), so it is only ever passed as `--flag=value` or after `--`.
+string_newtype!(Identifier, "identifier", 256, |_: &str| true);
+
+// Name of a registered MFA device (`tsh mfa rm <name>`). Chosen by the user at
+// registration, so spaces are allowed; control chars and a leading `-` are not.
+string_newtype!(DeviceName, "mfa_device", 256, is_safe_label, |_: &str| true);
+
 /// Operating system the client runs on. Detected at runtime; gates per-OS
 /// behaviour (binary name, paths). Capabilities themselves are probed, not
 /// inferred from this.
@@ -174,6 +199,19 @@ mod tests {
             assert!(Hostname::try_from(bad).is_err(), "should reject {bad:?}");
         }
         assert!(Hostname::try_from("node-01.root.example.com").is_ok());
+    }
+
+    #[test]
+    fn identifier_session_id_and_device_name() {
+        assert!(Identifier::try_from("system:masters").is_ok());
+        assert!(Identifier::try_from("proxy.example.com:443").is_ok());
+        assert!(Identifier::try_from("-as").is_err());
+        assert!(Identifier::try_from("a b").is_err());
+        assert!(SessionId::try_from("0b9a3c1e-7f2d-4c1a-9e3b-1f2a3b4c5d6e").is_ok());
+        assert!(SessionId::try_from("-x").is_err());
+        assert!(DeviceName::try_from("my yubikey").is_ok());
+        assert!(DeviceName::try_from("-rf").is_err());
+        assert!(DeviceName::try_from("bad\nname").is_err());
     }
 
     #[test]

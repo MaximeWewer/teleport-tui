@@ -151,7 +151,7 @@ pub(crate) enum Mode {
     /// Showing the current user's MFA devices (`tsh mfa ls`); add/remove/navigate.
     ShowMfa,
     /// Confirming removal of the carried MFA device (`tsh mfa rm`).
-    ConfirmMfaRm(String),
+    ConfirmMfaRm(DeviceName),
     /// Showing active sessions to join (`tsh sessions ls`); navigate + Enter join.
     ShowSessions,
     /// Read-only full-field detail popup for the selected admin row. Carries a
@@ -167,19 +167,19 @@ pub(crate) enum Mode {
     UserPicker(PendingConnect),
     /// Choosing a Kubernetes launcher tool for the carried (cluster, name, user).
     ToolPicker {
-        cluster: String,
-        name: String,
-        user: Option<String>,
+        cluster: ClusterName,
+        name: ResourceName,
+        user: Option<Identifier>,
     },
     /// Entering the database user for the carried (cluster, name).
     DbUser {
-        cluster: String,
-        name: String,
+        cluster: ClusterName,
+        name: ResourceName,
     },
     /// Entering the local proxy port for the carried app (cluster, name).
     AppPort {
-        cluster: String,
-        name: String,
+        cluster: ClusterName,
+        name: ResourceName,
     },
     /// An app proxy is running in the background (browser open); Esc stops it.
     AppProxy,
@@ -192,8 +192,8 @@ pub(crate) enum Mode {
     Forwards,
     /// Editing the `tsh kube exec` form for the carried (cluster, kube).
     KubeExec {
-        cluster: String,
-        kube: String,
+        cluster: ClusterName,
+        kube: ResourceName,
     },
     /// Editing the persisted defaults (Settings screen).
     Settings,
@@ -207,8 +207,14 @@ pub(crate) enum Mode {
 /// first picks a launcher tool (auto-proxy via `tsh proxy kube --exec`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PendingConnect {
-    Ssh { cluster: String, host: String },
-    Kube { cluster: String, name: String },
+    Ssh {
+        cluster: ClusterName,
+        host: Hostname,
+    },
+    Kube {
+        cluster: ClusterName,
+        name: ResourceName,
+    },
 }
 
 /// UI configuration injected from `config.toml` at startup. Mirrors the editable
@@ -246,32 +252,32 @@ pub(crate) enum Outcome {
     /// Open an application: start a background local proxy and a browser, then
     /// keep the TUI up (handled by the event loop, which owns process spawning).
     OpenApp {
-        name: String,
-        cluster: String,
+        name: ResourceName,
+        cluster: ClusterName,
         /// Requested local proxy port; `None` = pick a random free port.
         port: Option<u16>,
     },
     /// Open a Kubernetes cluster: start a background `tsh proxy kube`, then hand
     /// off a clean shell/tool with `$KUBECONFIG` set (event loop owns this).
     OpenKube {
-        kube: String,
-        cluster: String,
-        user: Option<String>,
+        kube: ResourceName,
+        cluster: ClusterName,
+        user: Option<Identifier>,
         tool: String,
     },
     /// Open a background `tsh proxy db` tunnel for a GUI client; the TUI shows the
     /// local endpoint and keeps the proxy up until dismissed (event loop owns it).
     OpenDbProxy {
-        name: String,
-        cluster: String,
+        name: ResourceName,
+        cluster: ClusterName,
     },
     /// Open a background SSH local port-forward (`tsh ssh -L <spec> -N`, no shell).
     /// Runs off the UI thread and stays up in the TUI's forwards list until stopped
     /// (event loop owns process spawning).
     OpenForward {
-        cluster: String,
-        user: String,
-        host: String,
+        cluster: ClusterName,
+        user: Option<Login>,
+        host: Hostname,
         spec: String,
         label: String,
     },
@@ -279,8 +285,8 @@ pub(crate) enum Outcome {
     /// event loop first runs `tsh kube login -c <cluster> <kube>` to set the
     /// active context, then hands off the interactive exec.
     KubeExec {
-        cluster: String,
-        kube: String,
+        cluster: ClusterName,
+        kube: ResourceName,
         exec: Vec<String>,
         label: String,
     },

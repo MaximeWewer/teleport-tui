@@ -10,22 +10,35 @@
 //! `infrastructure::tsh`/`tctl`, next to the I/O it drives.
 //!
 //! SECURITY: every argument is a discrete argv element - execution is argv-only,
-//! never a shell. Callers pass already-validated values (domain newtypes or the
-//! TUI's `valid_*` checks); these functions add no validation, only assembly.
-//! Value-bearing flags use the `--flag=value` form so a value can never be
-//! reparsed as a separate option.
+//! never a shell. Identifiers arrive as domain newtypes (`ClusterName`,
+//! `Hostname`, `Login`, `ResourceName`, ...), whose constructors already reject
+//! empty and flag-like (leading `-`) values, so a positional slot can't be turned
+//! into an option. The remaining `&str` values (forward spec, remote command,
+//! scp paths) are checked by the TUI's form validators. These functions add no
+//! validation, only assembly. Value-bearing flags use the `--flag=value` form so
+//! a value can never be reparsed as a separate option.
 
-/// `tsh login [--proxy=…] [--user=…] [--auth=…] [--mfa-mode=…]`. Empty `proxy`,
-/// `user`, or `mfa` omit their flags. `auth` is only emitted for the real
+use domain::value::{
+    ClusterName, DeviceName, Hostname, Identifier, Login, RequestId, ResourceName, RoleList,
+    SessionId,
+};
+
+/// `tsh login [--proxy=…] [--user=…] [--auth=…] [--mfa-mode=…]`. An absent
+/// `proxy`/`user` or an empty `mfa` omits its flag. `auth` is only emitted for the real
 /// connector flows (`local`/`passwordless`); `sso` drives the browser and takes
 /// no `--auth` value, so it (and any other value) is dropped.
 #[must_use]
-pub fn login(proxy: &str, user: &str, auth: &str, mfa: &str) -> Vec<String> {
+pub fn login(
+    proxy: Option<&Identifier>,
+    user: Option<&Identifier>,
+    auth: &str,
+    mfa: &str,
+) -> Vec<String> {
     let mut args = vec!["login".to_owned()];
-    if !proxy.is_empty() {
+    if let Some(proxy) = proxy {
         args.push(format!("--proxy={proxy}"));
     }
-    if !user.is_empty() {
+    if let Some(user) = user {
         args.push(format!("--user={user}"));
     }
     if auth == "local" || auth == "passwordless" {
@@ -45,32 +58,32 @@ pub fn logout() -> Vec<String> {
 
 /// `tsh ssh -c <cluster> <user>@<host>`.
 #[must_use]
-pub fn ssh(cluster: &str, user: &str, host: &str) -> Vec<String> {
+pub fn ssh(cluster: &ClusterName, user: &Login, host: &Hostname) -> Vec<String> {
     vec![
         "ssh".to_owned(),
         "-c".to_owned(),
-        cluster.to_owned(),
+        cluster.to_string(),
         format!("{user}@{host}"),
     ]
 }
 
 /// `tsh ssh -c <cluster> [-L <spec>] [-N] [<user>@]<host> [<command>]`.
 ///
-/// Extends [`ssh`] with the options form's extras: a blank `user` omits the login
+/// Extends [`ssh`] with the options form's extras: no `user` omits the login
 /// (tsh's default); a blank `forward` omits `-L`; `-N` (tunnel only, no remote
 /// shell) is emitted **only** for a pure forward - a `-L` with no `command` and
 /// `tunnel_only` set. A non-empty `command` is appended as a single argv element
 /// (the remote shell parses it, as with plain `ssh host cmd`).
 #[must_use]
 pub fn ssh_full(
-    cluster: &str,
-    user: &str,
-    host: &str,
+    cluster: &ClusterName,
+    user: Option<&Login>,
+    host: &Hostname,
     forward: &str,
     tunnel_only: bool,
     command: &str,
 ) -> Vec<String> {
-    let mut args = vec!["ssh".to_owned(), "-c".to_owned(), cluster.to_owned()];
+    let mut args = vec!["ssh".to_owned(), "-c".to_owned(), cluster.to_string()];
     if !forward.is_empty() {
         args.push("-L".to_owned());
         args.push(forward.to_owned());
@@ -78,29 +91,29 @@ pub fn ssh_full(
     if tunnel_only && !forward.is_empty() && command.is_empty() {
         args.push("-N".to_owned());
     }
-    args.push(if user.is_empty() {
-        host.to_owned()
-    } else {
-        format!("{user}@{host}")
-    });
+    args.push(user.map_or_else(|| host.to_string(), |u| format!("{u}@{host}")));
     if !command.is_empty() {
         args.push(command.to_owned());
     }
     args
 }
 
-/// `tsh db connect -c <cluster> <name> [--db-user=<user>]`. An empty `db_user`
-/// lets tsh pick the default user (no flag).
+/// `tsh db connect -c <cluster> <name> [--db-user=<user>]`. No `db_user` lets
+/// tsh pick the default user (no flag).
 #[must_use]
-pub fn db_connect(cluster: &str, name: &str, db_user: &str) -> Vec<String> {
+pub fn db_connect(
+    cluster: &ClusterName,
+    name: &ResourceName,
+    db_user: Option<&Identifier>,
+) -> Vec<String> {
     let mut args = vec![
         "db".to_owned(),
         "connect".to_owned(),
         "-c".to_owned(),
-        cluster.to_owned(),
-        name.to_owned(),
+        cluster.to_string(),
+        name.to_string(),
     ];
-    if !db_user.is_empty() {
+    if let Some(db_user) = db_user {
         args.push(format!("--db-user={db_user}"));
     }
     args
@@ -110,20 +123,19 @@ pub fn db_connect(cluster: &str, name: &str, db_user: &str) -> Vec<String> {
 /// spec `[login@]host:path` and the direction decides the from/to order.
 #[must_use]
 pub fn scp(
-    cluster: &str,
-    login: &str,
-    host: &str,
+    cluster: &ClusterName,
+    login: Option<&Login>,
+    host: &Hostname,
     remote_path: &str,
     local_path: &str,
     download: bool,
     recursive: bool,
 ) -> Vec<String> {
-    let remote_spec = if login.is_empty() {
-        format!("{host}:{remote_path}")
-    } else {
-        format!("{login}@{host}:{remote_path}")
-    };
-    let mut args = vec!["scp".to_owned(), "-c".to_owned(), cluster.to_owned()];
+    let remote_spec = login.map_or_else(
+        || format!("{host}:{remote_path}"),
+        |l| format!("{l}@{host}:{remote_path}"),
+    );
+    let mut args = vec!["scp".to_owned(), "-c".to_owned(), cluster.to_string()];
     if recursive {
         args.push("-r".to_owned());
     }
@@ -138,112 +150,121 @@ pub fn scp(
 }
 
 /// `tsh db login -c <cluster> [--db-user=<user>] <name>` - retrieve a database
-/// certificate (no interactive shell; the cert lands in `~/.tsh`). An empty
+/// certificate (no interactive shell; the cert lands in `~/.tsh`). No
 /// `db_user` lets tsh use the database's own default user.
 #[must_use]
-pub fn db_login(cluster: &str, name: &str, db_user: &str) -> Vec<String> {
+pub fn db_login(
+    cluster: &ClusterName,
+    name: &ResourceName,
+    db_user: Option<&Identifier>,
+) -> Vec<String> {
     let mut args = vec![
         "db".to_owned(),
         "login".to_owned(),
         "-c".to_owned(),
-        cluster.to_owned(),
+        cluster.to_string(),
     ];
-    if !db_user.is_empty() {
+    if let Some(db_user) = db_user {
         args.push(format!("--db-user={db_user}"));
     }
-    args.push(name.to_owned());
+    args.push(name.to_string());
     args
 }
 
 /// `tsh db logout -c <cluster> <name>` - remove a database's stored credentials.
 #[must_use]
-pub fn db_logout(cluster: &str, name: &str) -> Vec<String> {
+pub fn db_logout(cluster: &ClusterName, name: &ResourceName) -> Vec<String> {
     vec![
         "db".to_owned(),
         "logout".to_owned(),
         "-c".to_owned(),
-        cluster.to_owned(),
-        name.to_owned(),
+        cluster.to_string(),
+        name.to_string(),
     ]
 }
 
 /// `tsh apps login -c <cluster> <name>` - retrieve a short-lived app certificate.
 #[must_use]
-pub fn app_login(cluster: &str, name: &str) -> Vec<String> {
+pub fn app_login(cluster: &ClusterName, name: &ResourceName) -> Vec<String> {
     vec![
         "apps".to_owned(),
         "login".to_owned(),
         "-c".to_owned(),
-        cluster.to_owned(),
-        name.to_owned(),
+        cluster.to_string(),
+        name.to_string(),
     ]
 }
 
 /// `tsh apps logout -c <cluster> <name>` - remove a stored app certificate.
 #[must_use]
-pub fn app_logout(cluster: &str, name: &str) -> Vec<String> {
+pub fn app_logout(cluster: &ClusterName, name: &ResourceName) -> Vec<String> {
     vec![
         "apps".to_owned(),
         "logout".to_owned(),
         "-c".to_owned(),
-        cluster.to_owned(),
-        name.to_owned(),
+        cluster.to_string(),
+        name.to_string(),
     ]
 }
 
 /// `tsh kube login -c <cluster> <kube>` - make `kube` the active Kubernetes
 /// context, a prerequisite for `tsh kube exec` (which has no cluster flag).
 #[must_use]
-pub fn kube_login(cluster: &str, kube: &str) -> Vec<String> {
+pub fn kube_login(cluster: &ClusterName, kube: &ResourceName) -> Vec<String> {
     vec![
         "kube".to_owned(),
         "login".to_owned(),
         "-c".to_owned(),
-        cluster.to_owned(),
-        kube.to_owned(),
+        cluster.to_string(),
+        kube.to_string(),
     ]
 }
 
 /// `tsh kube exec [-c <container>] [-n <namespace>] -- <pod> <command…>` - run a
 /// command in a pod of the *current* kube context (set by [`kube_login`]). The
 /// `--` ends flag parsing so a command with leading-dash args is passed through
-/// verbatim. `command` is the already-tokenised argv. Empty container/namespace
-/// omit their flags.
+/// verbatim. `command` is the already-tokenised argv. An absent container/
+/// namespace omits its flag.
 #[must_use]
-pub fn kube_exec(pod: &str, command: &[String], container: &str, namespace: &str) -> Vec<String> {
+pub fn kube_exec(
+    pod: &Identifier,
+    command: &[String],
+    container: Option<&Identifier>,
+    namespace: Option<&Identifier>,
+) -> Vec<String> {
     let mut args = vec!["kube".to_owned(), "exec".to_owned()];
-    if !container.is_empty() {
+    if let Some(container) = container {
         args.push(format!("--container={container}"));
     }
-    if !namespace.is_empty() {
+    if let Some(namespace) = namespace {
         args.push(format!("--namespace={namespace}"));
     }
     args.push("--".to_owned());
-    args.push(pod.to_owned());
+    args.push(pod.to_string());
     args.extend(command.iter().cloned());
     args
 }
 
 /// `tsh request show -c <cluster> <id>`.
 #[must_use]
-pub fn request_show(cluster: &str, id: &str) -> Vec<String> {
+pub fn request_show(cluster: &ClusterName, id: &RequestId) -> Vec<String> {
     vec![
         "request".to_owned(),
         "show".to_owned(),
         "-c".to_owned(),
-        cluster.to_owned(),
-        id.to_owned(),
+        cluster.to_string(),
+        id.to_string(),
     ]
 }
 
 /// `tsh request create -c <cluster> --roles=<roles>`.
 #[must_use]
-pub fn request_create(cluster: &str, roles: &str) -> Vec<String> {
+pub fn request_create(cluster: &ClusterName, roles: &RoleList) -> Vec<String> {
     vec![
         "request".to_owned(),
         "create".to_owned(),
         "-c".to_owned(),
-        cluster.to_owned(),
+        cluster.to_string(),
         format!("--roles={roles}"),
     ]
 }
@@ -257,40 +278,40 @@ pub fn mfa_add() -> Vec<String> {
 
 /// `tsh mfa rm <name>` - remove the named MFA device.
 #[must_use]
-pub fn mfa_rm(name: &str) -> Vec<String> {
-    vec!["mfa".to_owned(), "rm".to_owned(), name.to_owned()]
+pub fn mfa_rm(name: &DeviceName) -> Vec<String> {
+    vec!["mfa".to_owned(), "rm".to_owned(), name.to_string()]
 }
 
 /// `tsh join <session-id>` - join a live session in the terminal.
 #[must_use]
-pub fn join(session_id: &str) -> Vec<String> {
-    vec!["join".to_owned(), session_id.to_owned()]
+pub fn join(session_id: &SessionId) -> Vec<String> {
+    vec!["join".to_owned(), session_id.to_string()]
 }
 
 /// `tsh play <session-id>` - replay a recorded session in the terminal.
 #[must_use]
-pub fn play(session_id: &str) -> Vec<String> {
-    vec!["play".to_owned(), session_id.to_owned()]
+pub fn play(session_id: &SessionId) -> Vec<String> {
+    vec!["play".to_owned(), session_id.to_string()]
 }
 
 /// `tsh request drop <id>` - drop a previously assumed access request, reverting
 /// the elevated access it granted.
 #[must_use]
-pub fn request_drop(id: &str) -> Vec<String> {
-    vec!["request".to_owned(), "drop".to_owned(), id.to_owned()]
+pub fn request_drop(id: &RequestId) -> Vec<String> {
+    vec!["request".to_owned(), "drop".to_owned(), id.to_string()]
 }
 
 /// `tsh request review (--approve|--deny) -c <cluster> <id>`.
 #[must_use]
-pub fn request_review(cluster: &str, id: &str, approve: bool) -> Vec<String> {
+pub fn request_review(cluster: &ClusterName, id: &RequestId, approve: bool) -> Vec<String> {
     let verdict = if approve { "--approve" } else { "--deny" };
     vec![
         "request".to_owned(),
         "review".to_owned(),
         verdict.to_owned(),
         "-c".to_owned(),
-        cluster.to_owned(),
-        id.to_owned(),
+        cluster.to_string(),
+        id.to_string(),
     ]
 }
 
@@ -298,11 +319,38 @@ pub fn request_review(cluster: &str, id: &str, approve: bool) -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn c(s: &str) -> ClusterName {
+        ClusterName::try_from(s).unwrap()
+    }
+    fn h(s: &str) -> Hostname {
+        Hostname::try_from(s).unwrap()
+    }
+    fn l(s: &str) -> Login {
+        Login::try_from(s).unwrap()
+    }
+    fn r(s: &str) -> ResourceName {
+        ResourceName::try_from(s).unwrap()
+    }
+    fn i(s: &str) -> Identifier {
+        Identifier::try_from(s).unwrap()
+    }
+    fn id(s: &str) -> RequestId {
+        RequestId::try_from(s).unwrap()
+    }
+    fn sid(s: &str) -> SessionId {
+        SessionId::try_from(s).unwrap()
+    }
+
     #[test]
     fn login_omits_empty_and_drops_sso_connector() {
-        assert_eq!(login("", "", "", ""), vec!["login"]);
+        assert_eq!(login(None, None, "", ""), vec!["login"]);
         assert_eq!(
-            login("proxy.example.com", "alice", "local", "otp"),
+            login(
+                Some(&i("proxy.example.com")),
+                Some(&i("alice")),
+                "local",
+                "otp"
+            ),
             vec![
                 "login",
                 "--proxy=proxy.example.com",
@@ -313,7 +361,7 @@ mod tests {
         );
         // sso has no connector value → no --auth.
         assert_eq!(
-            login("proxy.example.com", "", "sso", ""),
+            login(Some(&i("proxy.example.com")), None, "sso", ""),
             vec!["login", "--proxy=proxy.example.com"]
         );
     }
@@ -321,29 +369,30 @@ mod tests {
     #[test]
     fn ssh_and_db_shapes() {
         assert_eq!(
-            ssh("root.example.com", "admin", "node-01"),
+            ssh(&c("root.example.com"), &l("admin"), &h("node-01")),
             vec!["ssh", "-c", "root.example.com", "admin@node-01"]
         );
         assert_eq!(
-            db_connect("root", "pg", ""),
+            db_connect(&c("root"), &r("pg"), None),
             vec!["db", "connect", "-c", "root", "pg"]
         );
         assert_eq!(
-            db_connect("root", "pg", "reader"),
+            db_connect(&c("root"), &r("pg"), Some(&i("reader"))),
             vec!["db", "connect", "-c", "root", "pg", "--db-user=reader"]
         );
     }
 
     #[test]
     fn ssh_full_forward_tunnel_and_command() {
+        let (root, admin, node) = (c("root"), l("admin"), h("node-01"));
         // Plain: same shape as `ssh`.
         assert_eq!(
-            ssh_full("root", "admin", "node-01", "", false, ""),
+            ssh_full(&root, Some(&admin), &node, "", false, ""),
             vec!["ssh", "-c", "root", "admin@node-01"]
         );
         // Pure tunnel: -L before host, -N added (no command).
         assert_eq!(
-            ssh_full("root", "admin", "node-01", "8080:localhost:80", true, ""),
+            ssh_full(&root, Some(&admin), &node, "8080:localhost:80", true, ""),
             vec![
                 "ssh",
                 "-c",
@@ -357,9 +406,9 @@ mod tests {
         // A command suppresses -N even if tunnel_only is set, and is appended last.
         assert_eq!(
             ssh_full(
-                "root",
-                "admin",
-                "node-01",
+                &root,
+                Some(&admin),
+                &node,
                 "8080:localhost:80",
                 true,
                 "uptime"
@@ -374,9 +423,9 @@ mod tests {
                 "uptime"
             ]
         );
-        // Blank user omits the login (tsh default).
+        // No user omits the login (tsh default).
         assert_eq!(
-            ssh_full("root", "", "node-01", "", false, ""),
+            ssh_full(&root, None, &node, "", false, ""),
             vec!["ssh", "-c", "root", "node-01"]
         );
     }
@@ -386,9 +435,9 @@ mod tests {
         // Download: remote → local, recursive.
         assert_eq!(
             scp(
-                "root",
-                "alice",
-                "node-01",
+                &c("root"),
+                Some(&l("alice")),
+                &h("node-01"),
                 "/etc/hosts",
                 "./hosts",
                 true,
@@ -405,47 +454,64 @@ mod tests {
         );
         // Upload: local → remote, no login prefix, non-recursive.
         assert_eq!(
-            scp("root", "", "node-01", "/tmp/x", "./x", false, false),
+            scp(
+                &c("root"),
+                None,
+                &h("node-01"),
+                "/tmp/x",
+                "./x",
+                false,
+                false
+            ),
             vec!["scp", "-c", "root", "./x", "node-01:/tmp/x"]
         );
     }
 
     #[test]
     fn request_shapes() {
+        let root = c("root");
         assert_eq!(
-            request_show("root", "abc-123"),
+            request_show(&root, &id("abc-123")),
             vec!["request", "show", "-c", "root", "abc-123"]
         );
         assert_eq!(
-            request_create("root", "dba,sre"),
+            request_create(&root, &RoleList::try_from("dba,sre").unwrap()),
             vec!["request", "create", "-c", "root", "--roles=dba,sre"]
         );
         assert_eq!(
-            request_review("root", "abc-123", true),
+            request_review(&root, &id("abc-123"), true),
             vec!["request", "review", "--approve", "-c", "root", "abc-123"]
         );
         assert_eq!(
-            request_review("root", "abc-123", false),
+            request_review(&root, &id("abc-123"), false),
             vec!["request", "review", "--deny", "-c", "root", "abc-123"]
         );
-        assert_eq!(request_drop("abc-123"), vec!["request", "drop", "abc-123"]);
+        assert_eq!(
+            request_drop(&id("abc-123")),
+            vec!["request", "drop", "abc-123"]
+        );
     }
 
     #[test]
     fn kube_login_and_exec_shapes() {
         assert_eq!(
-            kube_login("root", "prod"),
+            kube_login(&c("root"), &r("prod")),
             vec!["kube", "login", "-c", "root", "prod"]
         );
         // Bare command, no container/namespace.
         assert_eq!(
-            kube_exec("api-0", &["sh".to_owned()], "", ""),
+            kube_exec(&i("api-0"), &["sh".to_owned()], None, None),
             vec!["kube", "exec", "--", "api-0", "sh"]
         );
         // Container + namespace + multi-token command with a leading-dash arg
         // (protected by the `--` separator).
         assert_eq!(
-            kube_exec("api-0", &["ls".to_owned(), "-la".to_owned()], "app", "prod"),
+            kube_exec(
+                &i("api-0"),
+                &["ls".to_owned(), "-la".to_owned()],
+                Some(&i("app")),
+                Some(&i("prod"))
+            ),
             vec![
                 "kube",
                 "exec",
@@ -461,24 +527,25 @@ mod tests {
 
     #[test]
     fn db_and_app_cert_lifecycle_shapes() {
+        let root = c("root");
         assert_eq!(
-            db_login("root", "pg", ""),
+            db_login(&root, &r("pg"), None),
             vec!["db", "login", "-c", "root", "pg"]
         );
         assert_eq!(
-            db_login("root", "pg", "reader"),
+            db_login(&root, &r("pg"), Some(&i("reader"))),
             vec!["db", "login", "-c", "root", "--db-user=reader", "pg"]
         );
         assert_eq!(
-            db_logout("root", "pg"),
+            db_logout(&root, &r("pg")),
             vec!["db", "logout", "-c", "root", "pg"]
         );
         assert_eq!(
-            app_login("root", "grafana"),
+            app_login(&root, &r("grafana")),
             vec!["apps", "login", "-c", "root", "grafana"]
         );
         assert_eq!(
-            app_logout("root", "grafana"),
+            app_logout(&root, &r("grafana")),
             vec!["apps", "logout", "-c", "root", "grafana"]
         );
     }
@@ -486,8 +553,11 @@ mod tests {
     #[test]
     fn mfa_and_play_shapes() {
         assert_eq!(mfa_add(), vec!["mfa", "add"]);
-        assert_eq!(mfa_rm("yubikey"), vec!["mfa", "rm", "yubikey"]);
-        assert_eq!(play("sid-1"), vec!["play", "sid-1"]);
-        assert_eq!(join("sid-1"), vec!["join", "sid-1"]);
+        assert_eq!(
+            mfa_rm(&DeviceName::try_from("my yubikey").unwrap()),
+            vec!["mfa", "rm", "my yubikey"]
+        );
+        assert_eq!(play(&sid("sid-1")), vec!["play", "sid-1"]);
+        assert_eq!(join(&sid("sid-1")), vec!["join", "sid-1"]);
     }
 }

@@ -13,6 +13,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::{self, sleep};
 use std::time::Duration;
 
+use domain::value::{ClusterName, Hostname, Identifier, Login, ResourceName};
+
 /// How many fresh ports to try when an auto-allocated one is lost to the TOCTOU
 /// race (see [`start_listening_proxy`]). Small: a real collision is rare, and a
 /// genuine failure (login/MFA) is diagnosed and stops the loop after one try.
@@ -136,14 +138,22 @@ fn start_listening_proxy(
 /// or it doesn't start listening in time.
 pub(crate) fn open_app(
     tsh: &Path,
-    name: &str,
-    cluster: &str,
+    name: &ResourceName,
+    cluster: &ClusterName,
     port: Option<u16>,
 ) -> io::Result<(Child, String)> {
     let (child, port) = start_listening_proxy(port, |p| {
         spawn_tracked(
             Command::new(tsh)
-                .args(["proxy", "app", name, "-c", cluster, "-p", &p.to_string()])
+                .args([
+                    "proxy",
+                    "app",
+                    name.as_str(),
+                    "-c",
+                    cluster.as_str(),
+                    "-p",
+                    &p.to_string(),
+                ])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null()),
@@ -167,8 +177,8 @@ pub(crate) fn open_app(
 /// doesn't start listening in time.
 pub(crate) fn open_db(
     tsh: &Path,
-    name: &str,
-    cluster: &str,
+    name: &ResourceName,
+    cluster: &ClusterName,
     port: Option<u16>,
 ) -> io::Result<(Child, String)> {
     let (child, port) = start_listening_proxy(port, |p| {
@@ -177,9 +187,9 @@ pub(crate) fn open_db(
                 .args([
                     "proxy",
                     "db",
-                    name,
+                    name.as_str(),
                     "-c",
-                    cluster,
+                    cluster.as_str(),
                     "--tunnel",
                     "-p",
                     &p.to_string(),
@@ -208,9 +218,9 @@ pub(crate) fn open_db(
 /// doesn't print its kubeconfig path in time.
 pub(crate) fn start_kube_proxy(
     tsh: &Path,
-    kube: &str,
-    cluster: &str,
-    user: Option<&str>,
+    kube: &ResourceName,
+    cluster: &ClusterName,
+    user: Option<&Identifier>,
 ) -> io::Result<(Child, String)> {
     let mut last: Option<io::Error> = None;
     for _ in 0..PORT_RETRIES {
@@ -237,16 +247,24 @@ pub(crate) fn start_kube_proxy(
 /// is stuck on login/MFA it can't answer with detached stdin ([`Attempt::Failed`]).
 fn kube_proxy_attempt(
     tsh: &Path,
-    kube: &str,
-    cluster: &str,
-    user: Option<&str>,
+    kube: &ResourceName,
+    cluster: &ClusterName,
+    user: Option<&Identifier>,
     port: u16,
 ) -> Attempt<(Child, String)> {
     let port_s = port.to_string();
     let mut cmd = Command::new(tsh);
-    cmd.args(["proxy", "kube", kube, "-c", cluster, "-p", &port_s]);
+    cmd.args([
+        "proxy",
+        "kube",
+        kube.as_str(),
+        "-c",
+        cluster.as_str(),
+        "-p",
+        &port_s,
+    ]);
     if let Some(u) = user {
-        cmd.args(["--as", u]);
+        cmd.args(["--as", u.as_str()]);
     }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -295,8 +313,8 @@ fn kube_proxy_attempt(
 
 /// Start `tsh ssh -c <cluster> -L <spec> -N [<user>@]<host>` in the background
 /// (no shell - a pure local port-forward) and return the child once the tunnel is
-/// up. `spec` is a validated `[bind:]port:host:hostport` forward; a blank `user`
-/// lets tsh pick the default login.
+/// up. `spec` is a validated `[bind:]port:host:hostport` forward; no `user` lets
+/// tsh pick the default login.
 ///
 /// Readiness: see [`start_forward`].
 ///
@@ -307,20 +325,16 @@ fn kube_proxy_attempt(
 /// Returns an error if the child can't spawn or the tunnel doesn't come up.
 pub(crate) fn start_ssh_forward(
     tsh: &Path,
-    cluster: &str,
-    user: &str,
-    host: &str,
+    cluster: &ClusterName,
+    user: Option<&Login>,
+    host: &Hostname,
     spec: &str,
 ) -> io::Result<Child> {
-    let target = if user.is_empty() {
-        host.to_owned()
-    } else {
-        format!("{user}@{host}")
-    };
+    let target = user.map_or_else(|| host.to_string(), |u| format!("{u}@{host}"));
     start_forward(local_forward_port(spec), || {
         spawn_tracked(
             Command::new(tsh)
-                .args(["ssh", "-c", cluster, "-L", spec, "-N", &target])
+                .args(["ssh", "-c", cluster.as_str(), "-L", spec, "-N", &target])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null()),

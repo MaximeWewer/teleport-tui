@@ -8,6 +8,9 @@
 //! focused-text accessor (`text_mut`). Pulling them out of `app` keeps the form
 //! plumbing separate from the update/dispatch logic.
 
+use domain::error::DomainError;
+use domain::value::{ClusterName, Hostname};
+
 /// Auth connector choices for the login dropdown. `""` = let `tsh` use the
 /// cluster default. `sso` triggers the browser flow (no `--auth` connector);
 /// `local`/`passwordless` are passed through as `--auth=<value>`.
@@ -69,13 +72,20 @@ impl LoginForm {
     }
 }
 
-/// `tsh scp` transfer form for an SSH node. `host`/`cluster` are captured from
-/// the selected node (not editable). The remote path lives on the node, the
-/// local path on this machine; `download` chooses the transfer direction.
+/// The SSH node a form acts on, captured from the selected row (not editable).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NodeTarget {
+    pub(crate) cluster: ClusterName,
+    pub(crate) host: Hostname,
+}
+
+/// `tsh scp` transfer form for an SSH node. `target` is captured from the
+/// selected node (`None` only for the never-shown default form). The remote path
+/// lives on the node, the local path on this machine; `download` chooses the
+/// transfer direction.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ScpForm {
-    pub(crate) host: String,
-    pub(crate) cluster: String,
+    pub(crate) target: Option<NodeTarget>,
     /// true = remote → local (copy from node); false = local → remote (send).
     pub(crate) download: bool,
     pub(crate) login: String,
@@ -230,12 +240,11 @@ impl AddUserForm {
 
 /// `tsh ssh` options form for the selected SSH node: an optional login, a local
 /// port-forward (`-L`) with a tunnel-only toggle (`-N`), and an optional one-off
-/// command to run instead of an interactive shell. `host`/`cluster` are captured
-/// from the selected node (not editable).
+/// command to run instead of an interactive shell. `target` is captured from the
+/// selected node (not editable).
 #[derive(Debug, Default, Clone)]
 pub(crate) struct SshOptionsForm {
-    pub(crate) host: String,
-    pub(crate) cluster: String,
+    pub(crate) target: Option<NodeTarget>,
     pub(crate) login: String,
     pub(crate) forward: String,
     /// `-N`: open the forward without a remote shell/command (pure tunnel).
@@ -306,14 +315,27 @@ impl KubeExecForm {
     }
 }
 
-/// Validate a connection user/login (from the profile or typed) before it
-/// becomes a CLI argument: no control/whitespace and no leading `-` (which
-/// could be parsed as a flag). Kube users may contain `:./@_-`.
-pub(crate) fn valid_user(user: &str) -> bool {
-    !user.is_empty()
-        && user.len() <= 256
-        && !user.starts_with('-')
-        && !user.chars().any(|c| c.is_control() || c.is_whitespace())
+/// Parse a typed form value with its domain constructor (which owns the
+/// validation: charset, length, no leading `-`), reporting a failure under the
+/// form's own `field` name so the message points at the row to fix.
+pub(crate) fn parse_field<'a, T: TryFrom<&'a str>>(
+    value: &'a str,
+    field: &'static str,
+) -> Result<T, DomainError> {
+    T::try_from(value).map_err(|_| DomainError::InvalidValue { field })
+}
+
+/// [`parse_field`] for an optional row: blank (after trimming) is `None`.
+pub(crate) fn parse_opt_field<'a, T: TryFrom<&'a str>>(
+    value: &'a str,
+    field: &'static str,
+) -> Result<Option<T>, DomainError> {
+    let value = value.trim();
+    if value.is_empty() {
+        Ok(None)
+    } else {
+        parse_field(value, field).map(Some)
+    }
 }
 
 /// Validate a `-L` local-forward spec (`[bind:]port:host:hostport`) before it

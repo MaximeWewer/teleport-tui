@@ -31,7 +31,10 @@ use domain::request::{AccessRequest, RequestState};
 use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
 use domain::secret::SecretString;
 use domain::session::ActiveSession;
-use domain::value::{ClusterName, Login, ResourceName, RoleList, TokenTypes};
+use domain::value::{
+    ClusterName, DeviceName, Hostname, Identifier, Login, RequestId, ResourceName, RoleList,
+    SessionId, TokenTypes,
+};
 use infrastructure::config::Config as InfraConfig;
 use infrastructure::logging::{ErrorRecord, NdjsonLogger};
 use infrastructure::redact::redact_message;
@@ -40,9 +43,9 @@ use ratatui::widgets::{ListState, TableState};
 use zeroize::Zeroizing;
 
 use crate::forms::{
-    AUTH_OPTIONS, AddUserForm, KubeExecForm, LoginForm, MFA_OPTIONS, ScpForm, SettingsForm,
-    SshOptionsForm, forward_binds_all_interfaces, opt_index, valid_command, valid_forward,
-    valid_path, valid_user,
+    AUTH_OPTIONS, AddUserForm, KubeExecForm, LoginForm, MFA_OPTIONS, NodeTarget, ScpForm,
+    SettingsForm, SshOptionsForm, forward_binds_all_interfaces, opt_index, parse_field,
+    parse_opt_field, valid_command, valid_forward, valid_path,
 };
 
 mod actions;
