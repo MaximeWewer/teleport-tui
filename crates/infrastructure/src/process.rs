@@ -7,7 +7,8 @@
 
 use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 /// Upper bound on how long a single read-path CLI call may run before it is
@@ -72,65 +73,169 @@ pub struct SystemCommandRunner;
 
 impl CommandRunner for SystemCommandRunner {
     fn run(&self, req: &CommandRequest) -> std::io::Result<CommandOutcome> {
-        // No shell (argv vector). `stdin` is detached so a read-path command can
-        // never block on - or steal keystrokes from - the terminal the TUI owns on
-        // another thread. `LC_ALL=C` pins tsh's human-readable messages to the
-        // English form `classify_failure` matches, regardless of the user's locale.
-        let mut child = Command::new(&req.bin)
-            .args(&req.args)
-            .env("LC_ALL", "C")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+        run_with_timeout(req, COMMAND_TIMEOUT)
+    }
+}
 
-        // Drain both pipes on their own threads: a command whose output fills the
-        // pipe buffer would otherwise block on write and never exit while we wait.
-        let mut out_pipe = child.stdout.take();
-        let mut err_pipe = child.stderr.take();
-        let out_reader = std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(p) = out_pipe.as_mut() {
-                let _ = p.read_to_end(&mut buf);
-            }
-            buf
-        });
-        let err_reader = std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(p) = err_pipe.as_mut() {
-                let _ = p.read_to_end(&mut buf);
-            }
-            buf
-        });
+/// Run `req` to completion, bounded by `timeout` (a parameter so tests can use a
+/// short one).
+fn run_with_timeout(req: &CommandRequest, timeout: Duration) -> std::io::Result<CommandOutcome> {
+    // No shell (argv vector). `stdin` is detached so a read-path command can
+    // never block on - or steal keystrokes from - the terminal the TUI owns on
+    // another thread. `LC_ALL=C` pins tsh's human-readable messages to the
+    // English form `classify_failure` matches, regardless of the user's locale.
+    let mut cmd = Command::new(&req.bin);
+    cmd.args(&req.args)
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    // Own process group: any helper the command forks (which inherits our pipes)
+    // can be killed together with it.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd.spawn()?;
 
-        // Wait with a deadline; kill a command that overruns so its worker frees.
-        let deadline = Instant::now() + COMMAND_TIMEOUT;
-        let status = loop {
-            if let Some(st) = child.try_wait()? {
-                break Some(st);
-            }
-            if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        };
+    // Drain both pipes on their own threads: a command whose output fills the
+    // pipe buffer would otherwise block on write and never exit while we wait.
+    let out_rx = drain(child.stdout.take());
+    let err_rx = drain(child.stderr.take());
 
-        // Killing (or the child exiting) closes the pipes, so the readers finish.
-        let stdout = out_reader.join().unwrap_or_default();
-        let stderr = err_reader.join().unwrap_or_default();
+    // Wait with a deadline; kill a command that overruns so its worker frees.
+    // A `try_wait` error kills it too, rather than returning with it running.
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break Ok(st),
+            Ok(None) if Instant::now() >= deadline => {
+                break Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "command timed out",
+                ));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(e) => break Err(e),
+        }
+    };
+    if status.is_err() {
+        kill_tree(&mut child);
+    }
 
-        let Some(status) = status else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "command timed out",
-            ));
-        };
-        Ok(CommandOutcome {
-            status: status.code(),
-            stdout: String::from_utf8_lossy(&stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&stderr).into_owned(),
-        })
+    // The readers finish at EOF, i.e. once every holder of the pipes' write end
+    // is gone. That is normally the command itself, but a helper it forked may
+    // outlive it with the pipes inherited: wait for it until the deadline, then
+    // kill the group. Never block unbounded on a reader - if one is still stuck
+    // (a helper escaped the group) it is abandoned rather than hanging the worker.
+    let (stdout, stderr) = match (recv_until(&out_rx, deadline), recv_until(&err_rx, deadline)) {
+        (Some(out), Some(err)) => (out, err),
+        (out, err) => {
+            kill_tree(&mut child);
+            let grace = Instant::now() + READER_GRACE;
+            match (
+                out.or_else(|| recv_until(&out_rx, grace)),
+                err.or_else(|| recv_until(&err_rx, grace)),
+            ) {
+                (Some(out), Some(err)) => (out, err),
+                _ => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "command output did not close",
+                    ));
+                }
+            }
+        }
+    };
+
+    let status = status?;
+    Ok(CommandOutcome {
+        status: status.code(),
+        stdout: String::from_utf8_lossy(&stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&stderr).into_owned(),
+    })
+}
+
+/// How long to wait for the output readers after killing the process group.
+const READER_GRACE: Duration = Duration::from_secs(2);
+
+/// Read a pipe to EOF on its own thread; the bytes arrive on the returned channel.
+fn drain(pipe: Option<impl Read + Send + 'static>) -> Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut p) = pipe {
+            let _ = p.read_to_end(&mut buf);
+        }
+        let _ = tx.send(buf);
+    });
+    rx
+}
+
+/// A reader's output, if it finishes by `deadline`.
+fn recv_until(rx: &Receiver<Vec<u8>>, deadline: Instant) -> Option<Vec<u8>> {
+    rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .ok()
+}
+
+/// SIGKILL the command's whole process group (Unix), then the command itself,
+/// and reap it. Errors (already gone) are ignored. Off Unix only the direct
+/// child is killed.
+fn kill_tree(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        // The leader's pgid equals its pid (`process_group(0)` at spawn).
+        if let Some(pgid) = i32::try_from(child.id())
+            .ok()
+            .and_then(rustix::process::Pid::from_raw)
+        {
+            let _ = rustix::process::kill_process_group(pgid, rustix::process::Signal::KILL);
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{CommandRequest, run_with_timeout};
+    use std::time::{Duration, Instant};
+
+    fn sh(script: &str) -> CommandRequest {
+        CommandRequest::new("/bin/sh", ["-c".to_owned(), script.to_owned()])
+    }
+
+    #[test]
+    fn timeout_kills_the_whole_group_even_with_a_forked_helper() {
+        // The backgrounded `sleep` inherits the pipes: killing only `sh` would
+        // leave the readers waiting on it forever.
+        let started = Instant::now();
+        let err = run_with_timeout(&sh("sleep 100 & sleep 100"), Duration::from_millis(300))
+            .expect_err("should time out");
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(10), "must not hang");
+    }
+
+    #[test]
+    fn helper_holding_the_pipes_after_exit_is_killed_and_output_kept() {
+        let started = Instant::now();
+        let out = run_with_timeout(&sh("echo hi; sleep 100 &"), Duration::from_millis(300))
+            .expect("the command itself succeeded");
+        assert!(out.succeeded());
+        assert_eq!(out.stdout, "hi\n");
+        assert!(started.elapsed() < Duration::from_secs(10), "must not hang");
+    }
+
+    #[test]
+    fn a_quick_command_returns_its_output() {
+        let out = run_with_timeout(
+            &sh("echo out; echo err >&2; exit 3"),
+            Duration::from_secs(10),
+        )
+        .expect("runs");
+        assert_eq!(out.status, Some(3));
+        assert_eq!(out.stdout, "out\n");
+        assert_eq!(out.stderr, "err\n");
     }
 }
