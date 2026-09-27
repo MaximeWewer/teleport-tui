@@ -37,7 +37,6 @@ use domain::value::{
     ClusterName, DeviceName, Hostname, Identifier, Login, RequestId, ResourceName, RoleList,
     SessionId, TokenTypes,
 };
-use infrastructure::redact::redact_message;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::{ListState, TableState};
 use zeroize::Zeroizing;
@@ -349,8 +348,9 @@ impl App {
                 .record("tui", LogLevel::Warn, &StartupWarning(w), &self.run_id);
         }
         if !warnings.is_empty() {
-            // Config text is user-supplied: strip control chars before display.
-            self.notice = Some(format!("⚠ {}", redact_message(&warnings.join(" · "))));
+            // Callers pass display-safe text: the adapters that produce the
+            // warnings (config parsing, binary lookup) redact them at the source.
+            self.notice = Some(format!("⚠ {}", warnings.join(" · ")));
         }
     }
 

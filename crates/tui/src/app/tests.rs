@@ -2038,10 +2038,10 @@ fn clamp_step_is_total_on_empty_list() {
 #[test]
 fn startup_warning_is_shown_until_the_next_key() {
     let mut app = test_app();
-    app.warn_startup(&["unknown key `x`".to_owned(), "bad\x1b[31m value".to_owned()]);
+    app.warn_startup(&["unknown key `x`".to_owned(), "bad value".to_owned()]);
     let notice = app.notice.clone().unwrap();
     assert!(notice.contains("unknown key `x`"));
-    assert!(!notice.contains('\x1b'), "control chars are stripped");
+    assert!(notice.contains("bad value"));
     // Background results don't clear it; the user's first key press does.
     app.apply(0, JobResult::AdminAllowed(true));
     assert!(app.notice.is_some());

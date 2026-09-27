@@ -46,6 +46,7 @@ use infrastructure::config::{Config, ConfigFileStore, default_kube_tools};
 use infrastructure::logging::NdjsonLogger;
 use infrastructure::platform::{locate_tctl, locate_tsh};
 use infrastructure::process::SystemCommandRunner;
+use infrastructure::redact::redact_message;
 use infrastructure::tctl::{TctlAdminRepository, UnavailableAdmin};
 use infrastructure::tsh::{
     TshAppRepository, TshAuthGateway, TshClusterRepository, TshDatabaseRepository,
@@ -81,10 +82,10 @@ fn real_main() -> Result<(), String> {
     // instead of letting the admin features silently vanish.
     let tctl: Option<PathBuf> = locate_tctl(config.tctl_path.clone()).ok();
     if let (None, Some(p)) = (&tctl, &config.tctl_path) {
-        warnings.push(format!(
+        warnings.push(redact_message(&format!(
             "tctl_path `{}` is not an absolute path to an existing file: admin features disabled",
             p.display()
-        ));
+        )));
     }
     let admin: Box<dyn AdminRepository> = match &tctl {
         Some(path) => Box::new(TctlAdminRepository::new(SystemCommandRunner, path.clone())),

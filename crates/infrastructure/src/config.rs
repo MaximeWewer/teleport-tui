@@ -11,6 +11,7 @@ use domain::port::PreferencesStore;
 use domain::preferences::Preferences;
 
 use crate::platform;
+use crate::redact::redact_message;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -76,10 +77,10 @@ impl Config {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Self::default(), Vec::new()),
             Err(e) => (
                 Self::default(),
-                vec![format!(
+                vec![redact_message(&format!(
                     "could not read config {}: {e} (using defaults)",
                     path.display()
-                )],
+                ))],
             ),
         }
     }
@@ -91,7 +92,9 @@ impl Config {
 
     /// Parse, also returning a warning for each malformed line, unknown key or
     /// invalid value (all of which are otherwise ignored), so a typo doesn't
-    /// silently fall back to the default.
+    /// silently fall back to the default. Warnings quote the file's text, so
+    /// they are redacted here (control chars stripped, secrets masked) and are
+    /// safe to display as-is.
     #[must_use]
     pub fn parse_with_warnings(contents: &str) -> (Self, Vec<String>) {
         let mut cfg = Self::default();
@@ -152,7 +155,7 @@ impl Config {
                 _ => warnings.push(format!("config line {lineno}: unknown key `{key}` ignored")),
             }
         }
-        (cfg, warnings)
+        (cfg, warnings.iter().map(|w| redact_message(w)).collect())
     }
 }
 
@@ -334,6 +337,15 @@ mod tests {
                 .1
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn warnings_are_display_safe() {
+        // Warnings quote the file's text: a hostile key can't inject ANSI.
+        let (_, warnings) = Config::parse_with_warnings("bad\x1b[31mkey = 1\n");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("bad[31mkey"), "{warnings:?}");
+        assert!(!warnings[0].contains('\x1b'), "control chars are stripped");
     }
 
     #[test]
