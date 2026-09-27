@@ -1,4 +1,4 @@
-//! SSH node entity — the MVP resource.
+//! SSH node entity -the MVP resource.
 
 use crate::resource::Resource;
 use crate::value::Hostname;

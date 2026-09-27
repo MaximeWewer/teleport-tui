@@ -155,7 +155,7 @@ fn render_aggregate(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let widths = column_widths(headers.len());
     let title = format!(
-        " {} — ALL CLUSTERS ({}) ",
+        " {} -ALL CLUSTERS ({}) ",
         app.tab.title(),
         app.visible.len()
     );

@@ -1,7 +1,7 @@
 //! The data model: the tab/mode enums, the `Outcome` the event loop acts on,
 //! the injected `Repositories` bundle, the background-proxy handle + events, the
 //! one-time secret views (`TokenView`/`InviteView`), and the aggregate row type.
-//! Pure type definitions — the update/dispatch logic lives in [`super`].
+//! Pure type definitions -the update/dispatch logic lives in [`super`].
 //!
 //! A child module of `app`: model types are re-exported from `super` so the rest
 //! of the crate keeps referring to them as `crate::app::Tab` etc. Imports and the
@@ -76,7 +76,7 @@ impl Tab {
     /// Whether the all-clusters aggregate must reach this tab's data by
     /// re-selecting each cluster's profile (serial), rather than the concurrent
     /// per-cluster `-c` fan-out. True for the admin tabs (root-scoped via `tctl`)
-    /// **and Recordings** — `tsh recordings ls` has no cluster flag either, so a
+    /// **and Recordings** -`tsh recordings ls` has no cluster flag either, so a
     /// leaf's recordings need a profile switch, exactly like the admin tabs.
     #[must_use]
     pub(crate) fn serial_aggregation(self) -> bool {
@@ -100,7 +100,7 @@ impl Tab {
     }
 
     /// Tabs that require elevated rights and are hidden without them: the Admin
-    /// group plus **Recordings** — reading the session audit log is a privileged
+    /// group plus **Recordings** -reading the session audit log is a privileged
     /// operation not every user can perform, so it's gated like the admin tabs.
     #[must_use]
     pub(crate) fn admin_gated(self) -> bool {
@@ -124,7 +124,7 @@ impl Tab {
 
 /// The active screen/modal **and the data that screen is operating on**. Modes
 /// that capture a target (a confirmation, a picker, a prompt) carry it inline, so
-/// a mode can't exist without its datum — e.g. you can't be in `ConfirmMfaRm`
+/// a mode can't exist without its datum -e.g. you can't be in `ConfirmMfaRm`
 /// without the device name. This replaces the former fieldless `Mode` + a
 /// separate `pending` slot, making those illegal (mode, no-data) states
 /// unrepresentable. Not `Copy` (some variants own `String`s).
@@ -155,8 +155,8 @@ pub(crate) enum Mode {
     /// Showing active sessions to join (`tsh sessions ls`); navigate + Enter join.
     ShowSessions,
     /// Read-only full-field detail popup for the selected admin row. Carries a
-    /// title + `(label, values)` pairs — each field is a list so multi-valued
-    /// fields (roles, labels) render one item per line — plus a vertical scroll
+    /// title + `(label, values)` pairs -each field is a list so multi-valued
+    /// fields (roles, labels) render one item per line -plus a vertical scroll
     /// offset (↑/↓ scroll when the fields overflow the popup; Esc/q/Enter close).
     ShowDetail {
         title: String,
@@ -284,7 +284,7 @@ pub(crate) enum Outcome {
         exec: Vec<String>,
         label: String,
     },
-    /// Replay a recorded session (`tsh play`) interruptibly — the event loop keeps
+    /// Replay a recorded session (`tsh play`) interruptibly -the event loop keeps
     /// the keyboard so Esc/q returns to the TUI (see [`crate::ssh::play_recording`]).
     PlayRecording {
         args: Vec<String>,
@@ -299,7 +299,7 @@ pub(crate) enum Outcome {
     },
 }
 
-/// Which kind of background proxy is running — drives the overlay wording (an
+/// Which kind of background proxy is running -drives the overlay wording (an
 /// app proxy opens a browser; a db proxy exposes a local endpoint for a client).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProxyKind {
@@ -340,8 +340,8 @@ impl Drop for AppProxy {
 }
 
 /// A running background SSH local port-forward (`tsh ssh -L … -N`). Dropping it
-/// stops the tunnel (kills the child), so stopping it from the list — or quitting
-/// the TUI — cleans up automatically.
+/// stops the tunnel (kills the child), so stopping it from the list -or quitting
+/// the TUI -cleans up automatically.
 #[derive(Debug)]
 pub(crate) struct Forward {
     child: std::process::Child,
@@ -378,7 +378,7 @@ impl Drop for Forward {
 /// blocking `tsh proxy …` start-up (port wait / kubeconfig handshake, up to a
 /// few seconds) runs off the UI thread instead of freezing the TUI. The event
 /// loop owns the terminal, so the kube handoff (`run_interactive`) must happen
-/// there — hence the result is routed back rather than handled in the worker.
+/// there -hence the result is routed back rather than handled in the worker.
 // The `*Ready` postfix reads as "launch finished" and is the clearest name for
 // each variant; keep it despite the shared suffix.
 #[allow(clippy::enum_variant_names)]

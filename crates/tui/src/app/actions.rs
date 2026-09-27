@@ -147,7 +147,7 @@ impl App {
     }
 
     /// Build `tsh login` from the form and hand off to the terminal. `tsh`
-    /// prompts for the password and MFA itself (browser/OTP) — never the TUI.
+    /// prompts for the password and MFA itself (browser/OTP) -never the TUI.
     pub(super) fn submit_login(&mut self) -> Outcome {
         let f = self.login_form.clone();
         // Only the free-text fields can carry bad input; auth/mfa come from
@@ -414,7 +414,7 @@ impl App {
         };
         // Recordings: Enter replays the selected session (`tsh play <sid>`).
         // Recordings never aggregates (no cluster flag), so the scoped list is
-        // always the source — even in all-clusters mode.
+        // always the source -even in all-clusters mode.
         if self.tab == Tab::Recordings {
             // The sid comes from the aggregate row in all-clusters mode (recorded
             // on the row, not a visible column) or the scoped list otherwise.
@@ -431,7 +431,7 @@ impl App {
                 args: cmd::play(&sid),
             };
         }
-        // Admin (tctl) tabs are read-only — Enter opens a full-field detail popup
+        // Admin (tctl) tabs are read-only -Enter opens a full-field detail popup
         // for the selected row instead of a connect action.
         if self.tab.is_admin() {
             return self.show_detail(idx);
@@ -742,7 +742,7 @@ impl App {
         Some((r.cluster.clone(), name.clone()))
     }
 
-    /// (cluster, name) of the highlighted Db/Apps row — from the aggregate row in
+    /// (cluster, name) of the highlighted Db/Apps row -from the aggregate row in
     /// all-clusters mode, else the scoped vec + selected cluster. Used by the
     /// cert-lifecycle actions (`l`/`u`), which are gated to those tabs.
     fn resource_target(&self) -> Option<(String, String)> {
@@ -842,7 +842,7 @@ impl App {
 
     /// Generate a join token via `tctl tokens add --format=json`, run off-thread.
     /// The JSON result (including the secret token) is captured and shown in a
-    /// popup — it is **never** logged. tctl availability is handled by the admin
+    /// popup -it is **never** logged. tctl availability is handled by the admin
     /// adapter (returns an error if absent).
     pub(super) fn generate_token(&mut self) {
         let token_type = self.input.trim().to_owned();

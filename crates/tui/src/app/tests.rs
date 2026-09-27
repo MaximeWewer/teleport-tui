@@ -222,7 +222,7 @@ impl AuthGateway for FakeAuth {
     }
 }
 
-/// Admin repo that denies every call — models a user without admin rights
+/// Admin repo that denies every call -models a user without admin rights
 /// (default `can_admin` probes `list_roles`, which errors here).
 #[derive(Debug)]
 struct NonAdmin;
@@ -574,7 +574,7 @@ impl AdminRepository for RecordingAdmin {
 fn scoped_admin_rekeys_selected_cluster_then_restores_root() {
     let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let mut app = test_app_with_admin(Box::new(RecordingAdmin(calls.clone())));
-    // View a leaf cluster — the UI selection the tsh profile does NOT follow, so
+    // View a leaf cluster -the UI selection the tsh profile does NOT follow, so
     // a naive `tctl` listing would hit whatever ~/.tsh last pointed at.
     app.topology
         .as_mut()
@@ -610,7 +610,7 @@ fn admin_tab_aggregates_across_clusters() {
     // Users fans out across both online clusters (root + leaf), each row tagged
     // with its cluster, none login-required (the fake profile switch succeeds).
     // Root's rows were already loaded scoped (`tctl` targets the root proxy), so
-    // they're reused from memory — only the *leaf* triggers a `list_users`.
+    // they're reused from memory -only the *leaf* triggers a `list_users`.
     app.on_key(press('5'));
     assert_eq!(app.tab, Tab::Users);
     assert_eq!(counter.load(Ordering::SeqCst), 1);
@@ -618,7 +618,7 @@ fn admin_tab_aggregates_across_clusters() {
     assert!(app.agg_rows.iter().all(|r| !r.login_required));
     assert!(app.agg_rows.iter().any(|r| r.cluster == "root.example"));
     assert!(app.agg_rows.iter().any(|r| r.cluster == "leaf.example"));
-    // Leave and return — the fan-out is cached per tab (no refetch).
+    // Leave and return -the fan-out is cached per tab (no refetch).
     app.on_key(press('1')); // SSH (aggregated)
     app.on_key(press('5')); // Users again
     assert!(app.aggregate, "still in all-clusters view");
@@ -902,7 +902,7 @@ fn entering_all_clusters_reuses_active_cluster_data() {
     assert_eq!(app.agg_rows.len(), 2);
     assert!(app.agg_rows.iter().any(|r| r.cluster == "root.example"));
     assert!(app.agg_rows.iter().any(|r| r.cluster == "leaf.example"));
-    // ...but only leaf triggered a fetch — root's rows came from memory.
+    // ...but only leaf triggered a fetch -root's rows came from memory.
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
 
@@ -1344,7 +1344,7 @@ fn prefetch_warms_all_tabs_on_start() {
 fn admin_prefetch_survives_probe_before_topology() {
     // Race: the admin-rights probe (`tctl status`) can land BEFORE
     // `tsh clusters`. Replay that order and assert the admin tabs still end
-    // up cached — rather than dispatched under a prefetch generation the
+    // up cached -rather than dispatched under a prefetch generation the
     // cluster load then bumps, which discarded them as stale.
     let mut app = test_app();
     // Reset to a pre-topology state, as if a fresh session just began.
@@ -1573,7 +1573,7 @@ fn tokens_render_like_tctl_plain() {
     assert_eq!(app.tab, Tab::Tokens);
     assert_eq!(app.tokens.len(), 2);
     // Plain, non-secret columns: TOKEN(name)/TYPE/LABELS/EXPIRES, like
-    // `tctl tokens ls` — no masking, no reveal.
+    // `tctl tokens ls` -no masking, no reveal.
     let row = app.tokens[0].row();
     assert_eq!(row[0], "tbot-ci"); // TOKEN = name
     assert_eq!(row[1], "Bot"); // TYPE

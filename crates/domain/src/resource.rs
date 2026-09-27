@@ -19,7 +19,7 @@ pub trait Resource {
 
     /// Full `(label, values)` breakdown for a detail popup: every field,
     /// untruncated. Each field is a **list of values** (a scalar is a one-element
-    /// list) so the view can render multi-valued fields — roles, labels — one
+    /// list) so the view can render multi-valued fields -roles, labels -one
     /// item per line instead of a comma blob. Defaults to pairing
     /// [`Resource::columns`] with [`Resource::row`] as single-element lists;
     /// override to split multi-valued fields and surface fields the table omits.
@@ -35,7 +35,7 @@ pub trait Resource {
     }
 }
 
-/// `k=v` pairs as one string per label — for the multi-line detail view.
+/// `k=v` pairs as one string per label -for the multi-line detail view.
 #[must_use]
 pub fn label_list(labels: &[(String, String)]) -> Vec<String> {
     labels.iter().map(|(k, v)| format!("{k}={v}")).collect()

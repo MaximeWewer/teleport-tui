@@ -17,7 +17,7 @@ pub(crate) const AUTH_OPTIONS: &[&str] = &["", "local", "passwordless", "sso"];
 /// `browser` open the browser; `webauthn` covers security keys (e.g. a Yubikey).
 pub(crate) const MFA_OPTIONS: &[&str] = &["", "otp", "webauthn", "platform", "sso", "browser"];
 
-/// Editable `tsh login` form. The password and MFA are NOT handled here — `tsh`
+/// Editable `tsh login` form. The password and MFA are NOT handled here -`tsh`
 /// prompts for them in the handed-over terminal (so secrets never enter the TUI).
 /// `auth`/`mfa` are indices into [`AUTH_OPTIONS`]/[`MFA_OPTIONS`] (dropdowns).
 #[derive(Debug, Default, Clone)]
@@ -350,7 +350,7 @@ pub(crate) fn valid_forward(spec: &str) -> bool {
 
 /// Validate a one-off remote command before it becomes a CLI argument: no
 /// control chars (terminal/log safety) and no leading `-` (so `tsh` can't reparse
-/// it as a flag). Spaces are allowed — as with plain `ssh host cmd`, the command
+/// it as a flag). Spaces are allowed -as with plain `ssh host cmd`, the command
 /// is one argv element that the *remote* shell parses; our side is argv-only.
 pub(crate) fn valid_command(cmd: &str) -> bool {
     !cmd.is_empty()

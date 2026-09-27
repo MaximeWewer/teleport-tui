@@ -6,7 +6,7 @@ use crate::value::ResourceName;
 
 /// A freshly generated join token (`tctl tokens add`). The `token` field is a
 /// **secret**: it is shown once in the UI and must never be logged. `Debug` is
-/// hand-written to mask it, so the guarantee is structural — a stray `{:?}` (a
+/// hand-written to mask it, so the guarantee is structural -a stray `{:?}` (a
 /// log line, a panic message on an unwrapped `Result<GeneratedToken>`) can't leak
 /// the token, regardless of caller discipline.
 #[derive(Clone, PartialEq, Eq)]
@@ -29,7 +29,7 @@ impl core::fmt::Debug for GeneratedToken {
 }
 
 /// A one-time account-setup URL from `tctl users add` / `tctl users reset`. The
-/// `url` embeds a secret invitation token — show once, never log. Domain is
+/// `url` embeds a secret invitation token -show once, never log. Domain is
 /// dependency-free, so it is a plain `String`; the caller moves it into
 /// zeroizing storage immediately. `Debug` masks the `url` (see [`GeneratedToken`]).
 #[derive(Clone, PartialEq, Eq)]
@@ -48,7 +48,7 @@ impl core::fmt::Debug for InviteLink {
 }
 
 /// An existing provision (join) token from `tctl tokens ls`. The listing shows
-/// only the same non-secret columns `tctl tokens ls` prints — the token's *name*
+/// only the same non-secret columns `tctl tokens ls` prints -the token's *name*
 /// (its identifier), its type(s), labels and expiry. A freshly *generated*
 /// token's secret value is a separate concern (see [`GeneratedToken`]).
 #[derive(Debug, Clone, PartialEq, Eq)]

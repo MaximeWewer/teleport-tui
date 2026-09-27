@@ -39,7 +39,7 @@ impl App {
                 // Only drop the aggregate caches when the *online cluster set*
                 // actually changed. A routine refresh (notably the one after a
                 // leaf login) leaves them intact, so we don't re-fan every tab
-                // across every cluster — only the current tab, whose cache was
+                // across every cluster -only the current tab, whose cache was
                 // dropped on purpose (submit_login), re-fans to pick up the leaf.
                 let online = |t: &ClusterTopology| {
                     let mut v: Vec<String> = t
@@ -85,7 +85,7 @@ impl App {
                 self.admin_probed = true;
                 // The admin tabs are warmed optimistically by the Clusters handler
                 // (in parallel with this slow probe), so no prefetch is needed
-                // here — that would only duplicate the in-flight ~3s tctl calls.
+                // here -that would only duplicate the in-flight ~3s tctl calls.
                 if !ok && self.tab.admin_gated() && !self.admin_group_reachable() {
                     // Rights denied *on the root cluster* while on an Admin/Recordings
                     // tab → fall back to SSH. A leaf-profile denial is inconclusive
@@ -213,7 +213,7 @@ impl App {
             | JobResult::Sessions(_)
             | JobResult::AdminAllowed(_)
             // These variants are routed directly in `apply`; reaching here would
-            // be a routing bug — degrade to a no-op load rather than panicking.
+            // be a routing bug -degrade to a no-op load rather than panicking.
             | JobResult::Aggregate { .. }
             | JobResult::AggregateAdmin { .. } => (self.tab, Ok(0)),
         }
@@ -297,7 +297,7 @@ impl App {
                 continue;
             }
             // Admin-gated tabs (admin group + Recordings): warm them optimistically
-            // until the probe actually denies rights — their `tctl`/`tsh` listings
+            // until the probe actually denies rights -their `tctl`/`tsh` listings
             // are slow, so don't wait on the equally slow probe. Still skip commands
             // the local `tsh` can't run. Everything else is gated on visibility.
             let want = if tab.admin_gated() {
@@ -400,7 +400,7 @@ impl App {
     }
 
     /// Dispatch a single-cluster admin listing that must run against the selected
-    /// cluster's profile — re-keys it (and restores root) around the `tctl` call
+    /// cluster's profile -re-keys it (and restores root) around the `tctl` call
     /// via [`Dispatcher::spawn_admin_scoped`]. Falls back to a plain dispatch if
     /// the topology isn't known yet (nothing to re-key to).
     fn dispatch_admin_scoped(&mut self, job: Job) {
@@ -458,7 +458,7 @@ impl App {
     }
 
     /// The cluster whose rows the current scoped listing holds, paired with those
-    /// rows as [`AggRow`]s — when the scoped cache is still valid. Lets the
+    /// rows as [`AggRow`]s -when the scoped cache is still valid. Lets the
     /// aggregate reuse data already fetched for a cluster instead of refetching it
     /// on the scoped → all-clusters switch.
     ///
@@ -527,7 +527,7 @@ impl App {
 
     /// All-clusters admin/recordings: a serial fan-out (not the concurrent `-c`
     /// path) because these commands have no cluster flag and each cluster is
-    /// reached by re-selecting its profile — a parallel switch would race. Cached
+    /// reached by re-selecting its profile -a parallel switch would race. Cached
     /// clusters render instantly; only the missing ones are re-fetched.
     fn dispatch_aggregate_admin(&mut self) {
         let (Some(clusters), Some(root)) = (

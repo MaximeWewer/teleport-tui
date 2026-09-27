@@ -1,4 +1,4 @@
-//! Domain layer — the pure business core of teleport-tui.
+//! Domain layer -the pure business core of teleport-tui.
 //!
 //! Hexagonal architecture, innermost ring: **no dependencies**, **no I/O**.
 //! Defines value objects, entities/aggregates, ports (traits), and the stable

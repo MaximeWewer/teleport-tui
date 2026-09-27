@@ -71,7 +71,7 @@ struct MfaDeviceDto {
     #[nserde(default, rename = "lastUsed")]
     last_used: String,
     // Exactly one of these is present; its presence identifies the device kind.
-    // Declared as empty markers — nanoserde ignores the (public, non-secret)
+    // Declared as empty markers -nanoserde ignores the (public, non-secret)
     // inner fields like `publicKeyCbor`.
     #[nserde(default)]
     totp: Option<MfaMarker>,
@@ -82,7 +82,7 @@ struct MfaDeviceDto {
 }
 
 /// Presence marker for a device-kind object (`totp`/`webauthn`/`sso`). The lone
-/// optional field is never set from JSON — it exists only so nanoserde generates
+/// optional field is never set from JSON -it exists only so nanoserde generates
 /// an unknown-field-skipping parser (a zero-field struct rejects inner fields
 /// like `publicKeyCbor`).
 #[derive(Debug, Default, DeJson)]

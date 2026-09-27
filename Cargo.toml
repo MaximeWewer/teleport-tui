@@ -15,11 +15,11 @@ license = "MIT"
 repository = "https://github.com/MaximeWewer/teleport-tui"
 publish = false
 
-# Shared dependency versions — declared once, referenced via `{ workspace = true }`.
+# Shared dependency versions -declared once, referenced via `{ workspace = true }`.
 [workspace.dependencies]
-# UI — the requested lib; re-exports crossterm so no separate crossterm dep needed.
+# UI -the requested lib; re-exports crossterm so no separate crossterm dep needed.
 ratatui = "0.30.2"
-# JSON — zero-dep, no proc-macro (preferred over serde/serde_json).
+# JSON -zero-dep, no proc-macro (preferred over serde/serde_json).
 nanoserde = "0.2.1"
 # Secret scrubbing.
 zeroize = "1.9.0"

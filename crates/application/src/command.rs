@@ -2,14 +2,14 @@
 //! terminal (login, ssh, db connect, scp, requests, logout).
 //!
 //! These live in the application layer, not infrastructure: they perform **no
-//! I/O** — they only assemble the argv that the presentation layer expresses as
+//! I/O** -they only assemble the argv that the presentation layer expresses as
 //! an interactive intent and hands to the terminal itself. Keeping them here
 //! means the TUI orchestrates interactive commands through the application
 //! layer rather than reaching into `infrastructure`. The *read-path* argv (the
 //! commands infrastructure actually *executes* via the command runner) stays in
 //! `infrastructure::tsh`/`tctl`, next to the I/O it drives.
 //!
-//! SECURITY: every argument is a discrete argv element — execution is argv-only,
+//! SECURITY: every argument is a discrete argv element -execution is argv-only,
 //! never a shell. Callers pass already-validated values (domain newtypes or the
 //! TUI's `valid_*` checks); these functions add no validation, only assembly.
 //! Value-bearing flags use the `--flag=value` form so a value can never be
@@ -58,7 +58,7 @@ pub fn ssh(cluster: &str, user: &str, host: &str) -> Vec<String> {
 ///
 /// Extends [`ssh`] with the options form's extras: a blank `user` omits the login
 /// (tsh's default); a blank `forward` omits `-L`; `-N` (tunnel only, no remote
-/// shell) is emitted **only** for a pure forward — a `-L` with no `command` and
+/// shell) is emitted **only** for a pure forward -a `-L` with no `command` and
 /// `tunnel_only` set. A non-empty `command` is appended as a single argv element
 /// (the remote shell parses it, as with plain `ssh host cmd`).
 #[must_use]
@@ -137,7 +137,7 @@ pub fn scp(
     args
 }
 
-/// `tsh db login -c <cluster> [--db-user=<user>] <name>` — retrieve a database
+/// `tsh db login -c <cluster> [--db-user=<user>] <name>` -retrieve a database
 /// certificate (no interactive shell; the cert lands in `~/.tsh`). An empty
 /// `db_user` lets tsh use the database's own default user.
 #[must_use]
@@ -155,7 +155,7 @@ pub fn db_login(cluster: &str, name: &str, db_user: &str) -> Vec<String> {
     args
 }
 
-/// `tsh db logout -c <cluster> <name>` — remove a database's stored credentials.
+/// `tsh db logout -c <cluster> <name>` -remove a database's stored credentials.
 #[must_use]
 pub fn db_logout(cluster: &str, name: &str) -> Vec<String> {
     vec![
@@ -167,7 +167,7 @@ pub fn db_logout(cluster: &str, name: &str) -> Vec<String> {
     ]
 }
 
-/// `tsh apps login -c <cluster> <name>` — retrieve a short-lived app certificate.
+/// `tsh apps login -c <cluster> <name>` -retrieve a short-lived app certificate.
 #[must_use]
 pub fn app_login(cluster: &str, name: &str) -> Vec<String> {
     vec![
@@ -179,7 +179,7 @@ pub fn app_login(cluster: &str, name: &str) -> Vec<String> {
     ]
 }
 
-/// `tsh apps logout -c <cluster> <name>` — remove a stored app certificate.
+/// `tsh apps logout -c <cluster> <name>` -remove a stored app certificate.
 #[must_use]
 pub fn app_logout(cluster: &str, name: &str) -> Vec<String> {
     vec![
@@ -191,7 +191,7 @@ pub fn app_logout(cluster: &str, name: &str) -> Vec<String> {
     ]
 }
 
-/// `tsh kube login -c <cluster> <kube>` — make `kube` the active Kubernetes
+/// `tsh kube login -c <cluster> <kube>` -make `kube` the active Kubernetes
 /// context, a prerequisite for `tsh kube exec` (which has no cluster flag).
 #[must_use]
 pub fn kube_login(cluster: &str, kube: &str) -> Vec<String> {
@@ -204,7 +204,7 @@ pub fn kube_login(cluster: &str, kube: &str) -> Vec<String> {
     ]
 }
 
-/// `tsh kube exec [-c <container>] [-n <namespace>] -- <pod> <command…>` — run a
+/// `tsh kube exec [-c <container>] [-n <namespace>] -- <pod> <command…>` -run a
 /// command in a pod of the *current* kube context (set by [`kube_login`]). The
 /// `--` ends flag parsing so a command with leading-dash args is passed through
 /// verbatim. `command` is the already-tokenised argv. Empty container/namespace
@@ -248,32 +248,32 @@ pub fn request_create(cluster: &str, roles: &str) -> Vec<String> {
     ]
 }
 
-/// `tsh mfa add` — interactively register a new MFA device (tsh prompts for the
+/// `tsh mfa add` -interactively register a new MFA device (tsh prompts for the
 /// name/type and drives the authenticator in the terminal).
 #[must_use]
 pub fn mfa_add() -> Vec<String> {
     vec!["mfa".to_owned(), "add".to_owned()]
 }
 
-/// `tsh mfa rm <name>` — remove the named MFA device.
+/// `tsh mfa rm <name>` -remove the named MFA device.
 #[must_use]
 pub fn mfa_rm(name: &str) -> Vec<String> {
     vec!["mfa".to_owned(), "rm".to_owned(), name.to_owned()]
 }
 
-/// `tsh join <session-id>` — join a live session in the terminal.
+/// `tsh join <session-id>` -join a live session in the terminal.
 #[must_use]
 pub fn join(session_id: &str) -> Vec<String> {
     vec!["join".to_owned(), session_id.to_owned()]
 }
 
-/// `tsh play <session-id>` — replay a recorded session in the terminal.
+/// `tsh play <session-id>` -replay a recorded session in the terminal.
 #[must_use]
 pub fn play(session_id: &str) -> Vec<String> {
     vec!["play".to_owned(), session_id.to_owned()]
 }
 
-/// `tsh request drop <id>` — drop a previously assumed access request, reverting
+/// `tsh request drop <id>` -drop a previously assumed access request, reverting
 /// the elevated access it granted.
 #[must_use]
 pub fn request_drop(id: &str) -> Vec<String> {

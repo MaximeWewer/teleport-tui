@@ -1,4 +1,4 @@
-//! teleport-tui — a terminal UI wrapping the Teleport client CLIs.
+//! teleport-tui -a terminal UI wrapping the Teleport client CLIs.
 //!
 //! Composition root: locates `tsh`, wires concrete adapters into the `App`
 //! (dependency injection), runs the event loop, and restores the terminal on
@@ -61,7 +61,7 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             // Fatal setup/teardown error: the TUI never started (or already tore
-            // down), so writing to stderr is safe — the alternate screen isn't up.
+            // down), so writing to stderr is safe -the alternate screen isn't up.
             #[allow(clippy::print_stderr)]
             {
                 eprintln!("teleport-tui: {e}");
@@ -74,7 +74,7 @@ fn main() -> ExitCode {
 fn real_main() -> Result<(), String> {
     let config = Config::load_default();
     let tsh: PathBuf = locate_tsh(config.tsh_path.clone()).map_err(|e| e.to_string())?;
-    // tctl is optional — admin features degrade gracefully if it's absent.
+    // tctl is optional -admin features degrade gracefully if it's absent.
     let tctl: Option<PathBuf> = locate_tctl(config.tctl_path.clone()).ok();
     let admin: Box<dyn AdminRepository> = match &tctl {
         Some(path) => Box::new(TctlAdminRepository::new(
@@ -137,7 +137,7 @@ fn run(terminal: &mut Tui, app: &mut App, refresh: Option<Duration>) -> io::Resu
     let mut last_refresh = Instant::now();
     // Redraw only when something changed (a key, a resize, an auto-refresh, or a
     // background result/spinner tick), instead of unconditionally every poll
-    // cycle — saves the ~8 idle redraws/sec the 120ms poll would otherwise force.
+    // cycle -saves the ~8 idle redraws/sec the 120ms poll would otherwise force.
     let mut dirty = true;
     loop {
         // Apply any finished background jobs and animate the spinner.
@@ -173,7 +173,7 @@ fn run(terminal: &mut Tui, app: &mut App, refresh: Option<Duration>) -> io::Resu
                         return Ok(());
                     }
                 }
-                // Mouse wheel scrolls the focused list — routed through the same
+                // Mouse wheel scrolls the focused list -routed through the same
                 // path as ↑/↓ so every mode (table, pickers, sessions/MFA) reacts.
                 Event::Mouse(m) => {
                     let scroll = match m.kind {
@@ -220,11 +220,11 @@ fn handle_key(terminal: &mut Tui, app: &mut App, key: KeyEvent) -> bool {
         Outcome::Quit => return true,
         Outcome::Continue => {}
         Outcome::Run { args, label } => run_and_report(terminal, app, &args, &label, false),
-        // A one-off command finishes on its own — pause on its output (a keypress
+        // A one-off command finishes on its own -pause on its output (a keypress
         // returns) so a fast command's result isn't wiped by the TUI redraw.
         Outcome::RunCommand { args, label } => run_and_report(terminal, app, &args, &label, true),
         // Proxy launches block (port wait / kubeconfig handshake) for up to
-        // several seconds — run them on a worker thread and handle completion in
+        // several seconds -run them on a worker thread and handle completion in
         // `drain_proxy_events`, so the UI never freezes.
         Outcome::OpenApp {
             name,
@@ -351,7 +351,7 @@ fn handle_kube_exec(
 }
 
 /// React to a completed background proxy launch. Runs on the UI thread, which
-/// owns the terminal — required for the kube shell handoff (`run_interactive`).
+/// owns the terminal -required for the kube shell handoff (`run_interactive`).
 fn handle_proxy_event(terminal: &mut Tui, app: &mut App, ev: app::ProxyEvent) {
     match ev {
         app::ProxyEvent::AppReady { name, kind, result } => match result {

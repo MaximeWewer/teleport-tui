@@ -24,7 +24,7 @@ impl App {
     /// modes accept it (a paste is meaningless in a list/confirm/normal mode, and
     /// forwarding printable chars there could trigger commands like `q`/`r`).
     /// Control characters are dropped so a pasted newline/tab can't submit the
-    /// form or switch fields — the whole reason bracketed paste is enabled.
+    /// form or switch fields -the whole reason bracketed paste is enabled.
     pub(crate) fn on_paste(&mut self, text: &str) {
         if !self.accepts_text_input() {
             return;
@@ -226,12 +226,12 @@ impl App {
             }
             KeyCode::Char('c') => {
                 // The picker lists the topology; without it (clusters not loaded
-                // yet, or `tsh clusters` failed — e.g. an expired session) there's
+                // yet, or `tsh clusters` failed -e.g. an expired session) there's
                 // nothing to show, so give feedback instead of entering an empty,
                 // invisible Picker mode.
                 let Some(topo) = self.topology.as_ref() else {
                     self.status =
-                        Some("clusters not loaded — press L to log in, or r to retry".to_owned());
+                        Some("clusters not loaded -press L to log in, or r to retry".to_owned());
                     return Outcome::Continue;
                 };
                 // Index 0 = "All clusters"; real clusters are offset by 1.
@@ -261,7 +261,7 @@ impl App {
                 self.recompute_visible();
             }
             // Move the highlight through the filtered results without leaving
-            // search — `j`/`k` can't be used here (they're search characters), so
+            // search -`j`/`k` can't be used here (they're search characters), so
             // the arrows drive navigation while the filter stays live.
             KeyCode::Down => self.move_selection(true),
             KeyCode::Up => self.move_selection(false),
@@ -699,11 +699,11 @@ impl App {
 
     /// MFA-devices popup: navigate, register a new device, or remove one.
     /// Read-only detail popup: ↑/↓ and PgUp/PgDn scroll when the fields overflow
-    /// the popup; Home jumps to the top; Esc/q/Enter — or any other key — dismiss.
+    /// the popup; Home jumps to the top; Esc/q/Enter -or any other key -dismiss.
     /// The mouse wheel routes here via [`Self::on_scroll`], so it now scrolls the
     /// content instead of closing the popup.
     fn on_key_detail(&mut self, key: KeyEvent) -> Outcome {
-        // (amount, up) — `None` means "not a scroll key → dismiss".
+        // (amount, up) -`None` means "not a scroll key → dismiss".
         let step: Option<(u16, bool)> = match key.code {
             KeyCode::Down | KeyCode::Char('j') => Some((1, false)),
             KeyCode::Up | KeyCode::Char('k') => Some((1, true)),
@@ -721,7 +721,7 @@ impl App {
                 *scroll = scroll.saturating_sub(amount);
             } else {
                 // One logical line per value (a valueless field still takes one),
-                // matching the render — caps the scroll so it can't run off into
+                // matching the render -caps the scroll so it can't run off into
                 // blank space below the last field.
                 let max = rows
                     .iter()
@@ -746,7 +746,7 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') if !self.mfa_devices.is_empty() => {
                 self.mfa_sel = clamp_step(self.mfa_sel, self.mfa_devices.len(), false);
             }
-            // Register a new device — interactive (tsh drives the authenticator).
+            // Register a new device -interactive (tsh drives the authenticator).
             KeyCode::Char('a') => {
                 self.mfa_devices.clear();
                 self.mode = Mode::Normal;

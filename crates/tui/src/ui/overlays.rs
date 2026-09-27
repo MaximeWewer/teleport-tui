@@ -1,5 +1,5 @@
 //! Popup overlays: pickers, confirmations, one-time secret views, MFA/session
-//! lists, and the help screen — drawn centred over the frame.
+//! lists, and the help screen -drawn centred over the frame.
 //!
 //! Split out of `ui`; imports and shared render helpers arrive via `super::*`.
 
@@ -143,7 +143,7 @@ pub(super) fn render_token_result(frame: &mut Frame, app: &App) {
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "copy it now — it is shown once and not stored or logged.  any key to close.",
+        "copy it now -it is shown once and not stored or logged.  any key to close.",
         Style::default().fg(Color::DarkGray),
     )));
     frame.render_widget(
@@ -174,7 +174,7 @@ pub(super) fn render_invite(frame: &mut Frame, app: &App) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "share it now — it is shown once and not stored or logged.  any key to close.",
+            "share it now -it is shown once and not stored or logged.  any key to close.",
             Style::default().fg(Color::DarkGray),
         )),
     ];
@@ -196,7 +196,7 @@ pub(super) fn render_mfa(frame: &mut Frame, app: &App) {
         return;
     }
     // A stateful List (seeded from `mfa_sel`) so ratatui scrolls to keep the
-    // selected device visible when the list is longer than the popup — a plain
+    // selected device visible when the list is longer than the popup -a plain
     // Paragraph would let the selection move off-screen out of reach.
     let items: Vec<ListItem> = app
         .mfa_devices
@@ -244,7 +244,7 @@ pub(super) fn render_sessions(frame: &mut Frame, app: &App) {
         return;
     }
     // A stateful List (seeded from `sessions_sel`) so ratatui scrolls to keep the
-    // selected session visible when the list overflows the popup — a plain
+    // selected session visible when the list overflows the popup -a plain
     // Paragraph would let the selection move off-screen out of reach.
     let items: Vec<ListItem> = app
         .sessions
@@ -373,17 +373,14 @@ fn help_action_rows(
 ) -> Vec<(&'static str, String)> {
     let mut rows: Vec<(&str, String)> = vec![
         ("Tab / Shift-Tab", "next / previous visible tab".to_owned()),
-        (
-            "1 – 0",
-            format!("jump to tab — {}", visible_tabs.join("  ")),
-        ),
+        ("1 – 0", format!("jump to tab -{}", visible_tabs.join("  "))),
         ("↑/↓  j/k", "move selection".to_owned()),
         ("/", "incremental search/filter".to_owned()),
         ("Enter", format!("open: {}", enter_acts.join(" • "))),
     ];
     rows.push((
         "o",
-        "SSH: options — -L port-forward, -N tunnel, or a one-off command".to_owned(),
+        "SSH: options --L port-forward, -N tunnel, or a one-off command".to_owned(),
     ));
     rows.push((
         "F",
@@ -442,7 +439,7 @@ fn help_action_rows(
     rows.push(("L", "login (tsh login)".to_owned()));
     rows.push((
         "p",
-        "settings — edit & persist default behaviours".to_owned(),
+        "settings -edit & persist default behaviours".to_owned(),
     ));
     rows.push(("O", "logout (with confirmation)".to_owned()));
     rows.push(("?", "this help".to_owned()));
@@ -493,7 +490,7 @@ pub(super) fn render_help(frame: &mut Frame, app: &App) {
 
     let mut lines: Vec<Line> = vec![
         Line::from(Span::styled(
-            "teleport-tui — keybindings",
+            "teleport-tui -keybindings",
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(""),

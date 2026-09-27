@@ -64,7 +64,7 @@ string_newtype!(ClusterName, "cluster_name", 253, |s: &str| {
 // SSH target host. DNS-ish charset (letters, digits, dot, hyphen); the
 // no-leading-`-` rule in `is_safe_ident` blocks option injection into the ssh
 // layer (e.g. `-oProxyCommand=…`, `-L…`). A bare `user@host` form is NOT
-// accepted here — model the login separately as a `Login`.
+// accepted here -model the login separately as a `Login`.
 string_newtype!(Hostname, "hostname", 253, |s: &str| {
     s.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')

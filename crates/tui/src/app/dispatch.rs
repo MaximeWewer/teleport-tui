@@ -87,7 +87,7 @@ pub(super) enum JobResult {
     },
 }
 
-/// Run a job against the repositories. Pure dispatch — safe to call from a
+/// Run a job against the repositories. Pure dispatch -safe to call from a
 /// worker thread (repos are `Send + Sync`).
 fn run_job(repos: &Repositories, job: Job) -> JobResult {
     match job {
@@ -135,7 +135,7 @@ fn run_job(repos: &Repositories, job: Job) -> JobResult {
 
 /// One cluster's rows for an all-clusters admin fan-out. `tctl` targets the
 /// currently logged-in proxy, so the caller re-selects `ctx` (`select_cluster`)
-/// — which is why the fan-out runs serially on one thread, not the concurrent
+/// -which is why the fan-out runs serially on one thread, not the concurrent
 /// per-cluster jobs used for cluster-scoped tabs (a parallel profile switch would
 /// race). A cluster without a live session yields a single `login_required`
 /// placeholder instead of erroring.
@@ -250,7 +250,7 @@ fn aggregate_rows(
 }
 
 /// The concurrency seam. Owns the repository ports and the background job/proxy
-/// channels, and knows how to run a [`Job`] — inline in `synchronous` mode (for
+/// channels, and knows how to run a [`Job`] -inline in `synchronous` mode (for
 /// deterministic tests) or on a worker thread otherwise. Pulling this out keeps
 /// the threading / channel / `Send + Sync` plumbing out of [`App`], which is
 /// left to own view and session state.
@@ -301,7 +301,7 @@ impl Dispatcher {
     /// shared channel and send each result back on `job_tx`. Bounding the worker
     /// count caps how many `tsh`/`tctl` subprocesses one fan-out can run at once
     /// (a topology switch would otherwise spawn a thread per tab per cluster). The
-    /// receiver lock is held only to dequeue — never across `run_job` — so the
+    /// receiver lock is held only to dequeue -never across `run_job` -so the
     /// workers still execute jobs concurrently, up to the pool size.
     fn start_pool(
         repos: &Arc<Repositories>,
@@ -349,8 +349,8 @@ impl Dispatcher {
 
     /// Run a single-cluster admin (`tctl`) job against `cluster` by re-keying the
     /// profile to it first (`tsh login --proxy`), then restoring `root`. `tctl`
-    /// has no cluster flag — it targets whatever cluster `~/.tsh` currently points
-    /// at — so without this a scoped admin listing would hit a leaf profile (the
+    /// has no cluster flag -it targets whatever cluster `~/.tsh` currently points
+    /// at -so without this a scoped admin listing would hit a leaf profile (the
     /// UI's cluster selection does not re-key the profile) and error. Runs on a
     /// dedicated thread under [`profile_lock`], serialised against the admin
     /// fan-out and the after-action restore so the shared profile can't be flipped
@@ -392,7 +392,7 @@ impl Dispatcher {
     }
 
     /// All-clusters admin fan-out, **streamed serially**: `tctl` has no cluster
-    /// flag, so we re-select each cluster in turn (one thread — a parallel switch
+    /// flag, so we re-select each cluster in turn (one thread -a parallel switch
     /// would race), but emit one `AggregateAdmin` result *per cluster* as it
     /// finishes so the reachable clusters (root first) render without waiting for
     /// the leaves. The root profile is restored at the end. In synchronous mode
@@ -435,7 +435,7 @@ impl Dispatcher {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let rows = admin_cluster_rows(&repos, tab, ctx);
-                    // Restore root while still holding the lock — the active profile
+                    // Restore root while still holding the lock -the active profile
                     // is then only ever on a leaf inside this critical section. So
                     // if the app exits mid-fan (worker thread killed), the profile
                     // is left on root, not stranded on a leaf (which would break
@@ -453,7 +453,7 @@ impl Dispatcher {
     /// Post-interactive refresh, off the UI thread. Optionally restores the root
     /// profile first (a global `~/.tsh` mutation → taken under [`profile_lock`],
     /// serialised against [`Dispatcher::spawn_admin_stream`]), then re-reads
-    /// status and — when the action was a login/logout (`reload_topology`) — the
+    /// status and -when the action was a login/logout (`reload_topology`) -the
     /// topology and admin probe. The restore is ordered *before* the reads by
     /// running them on one worker thread, so the blocking `tsh login --proxy`
     /// re-key never freezes the UI. Synchronous mode applies the results inline.
@@ -510,7 +510,7 @@ impl Dispatcher {
 
     /// Synchronously re-select a profile (`tsh login --proxy`). Used to restore
     /// the root profile right after an all-clusters leaf login, before the next
-    /// cluster/status refresh — a fast, valid-cert re-key, so blocking the UI
+    /// cluster/status refresh -a fast, valid-cert re-key, so blocking the UI
     /// briefly here is acceptable. Errors are non-fatal (the aggregate fan-out
     /// restores root again at its end anyway).
     fn restore_profile(&self, proxy: &str) {

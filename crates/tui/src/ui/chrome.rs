@@ -8,7 +8,7 @@ use super::*;
 
 pub(super) fn render_tabs(frame: &mut Frame, app: &App, area: Rect) {
     // Only show tabs the installed `tsh` supports (and admin tabs only with
-    // rights) — hidden tabs never appear rather than erroring on use.
+    // rights) -hidden tabs never appear rather than erroring on use.
     let access: Vec<Tab> = Tab::ACCESS
         .into_iter()
         .filter(|t| app.tab_visible(*t))
@@ -140,7 +140,7 @@ fn profile_line(app: &App) -> Line<'static> {
             ])
         }
         None => Line::from(Span::styled(
-            "not logged in — press L to login",
+            "not logged in -press L to login",
             Style::default().fg(Color::Red),
         )),
     }
@@ -223,7 +223,7 @@ pub(super) fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
                 "reset this user's credentials?  y/Enter confirm  Esc cancel"
             }
             Mode::AddUser => "Tab/↑↓ move  type to edit  Enter create  Esc cancel",
-            Mode::ShowInvite => "copy the setup URL now — any key to close (it is not stored)",
+            Mode::ShowInvite => "copy the setup URL now -any key to close (it is not stored)",
             Mode::ShowMfa => "↑/↓ select · a add · d remove · Esc/q close",
             Mode::ConfirmMfaRm(_) => "remove this MFA device?  y/Enter confirm  Esc cancel",
             Mode::ShowSessions => "↑/↓ select · Enter join · Esc/q close",
@@ -231,7 +231,7 @@ pub(super) fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             Mode::CreateToken => {
                 "type token type (node, app, db, kube…)  Enter generate  Esc cancel"
             }
-            Mode::ShowToken => "copy the token now — any key to close (it is not stored)",
+            Mode::ShowToken => "copy the token now -any key to close (it is not stored)",
             Mode::UserPicker(_) => "↑/↓ choose user  Enter connect  Esc cancel",
             Mode::ToolPicker { .. } => "↑/↓ choose tool  Enter open  Esc cancel",
             Mode::DbUser { .. } => "type db user (blank = default)  Enter connect  Esc cancel",
@@ -241,7 +241,7 @@ pub(super) fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
             Mode::Forwards => "↑/↓ select · Enter/d stop · Esc close",
             Mode::KubeExec { .. } => "Tab/↑↓ move · type to edit · Enter run · Esc cancel",
             Mode::Settings => "Tab/↑↓ move · type or ←/→ edit · Enter save · Esc cancel",
-            Mode::AppProxy => "app proxy running — Esc/q to stop and return",
+            Mode::AppProxy => "app proxy running -Esc/q to stop and return",
             Mode::LoginForm => "Tab/↑↓ move  type to edit  Enter login  Esc cancel",
             Mode::Help => "press any key to close help",
             // The base view's footer is built elsewhere; no modal hint to show.

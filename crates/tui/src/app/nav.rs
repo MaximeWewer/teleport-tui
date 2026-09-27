@@ -82,7 +82,7 @@ impl App {
 
     /// Whether the admin / Recordings tab group should be shown. The `tctl`
     /// rights probe (`can_admin`) runs against the *currently selected profile
-    /// cluster*, and `tctl` has no cluster flag — so on a leaf it always errors,
+    /// cluster*, and `tctl` has no cluster flag -so on a leaf it always errors,
     /// making a `false` verdict there a false negative. We therefore hide the
     /// group only when we probed **on the root cluster** and were denied; a leaf
     /// profile (or a not-yet-probed session) keeps it visible, and a genuine lack
@@ -98,7 +98,7 @@ impl App {
         !self.probe_ran_on_root()
     }
 
-    /// True when the active profile's cluster is the topology root — the only
+    /// True when the active profile's cluster is the topology root -the only
     /// context in which a `can_admin` denial is trustworthy.
     fn probe_ran_on_root(&self) -> bool {
         match (self.profile.as_ref(), self.topology.as_ref()) {
