@@ -1,0 +1,26 @@
+name: Advisories
+
+# Weekly RustSec advisory scan. quality.yml only runs cargo-deny on pushes and
+# pull requests, so a vulnerability published against an already-locked
+# dependency would go unnoticed on a quiet repository. This re-checks the
+# committed Cargo.lock on a schedule (and on demand).
+on:
+  schedule:
+    # Mondays 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+# Least privilege: the scan only reads the repository.
+permissions:
+  contents: read
+
+jobs:
+  advisories:
+    name: cargo-deny advisories
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
