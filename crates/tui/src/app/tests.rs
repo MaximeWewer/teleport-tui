@@ -840,6 +840,33 @@ fn agg_slice_caches_per_cluster_even_when_off_tab() {
 }
 
 #[test]
+fn aggregate_error_renders_an_error_row_without_caching_it() {
+    let mut app = test_app();
+    app.aggregate = true;
+    app.agg_pending = 1;
+    app.apply(
+        app.agg_seq,
+        JobResult::Aggregate {
+            tab: Tab::Ssh,
+            cluster: "leaf.example".to_owned(),
+            rows: Err(DomainError::ClusterOffline {
+                cluster: "leaf.example".to_owned(),
+            }
+            .into()),
+        },
+    );
+    // Shown like the admin path's error row, not silently dropped...
+    assert_eq!(app.agg_rows.len(), 1);
+    assert_eq!(app.agg_rows[0].cluster, "leaf.example");
+    assert!(app.agg_rows[0].cells[0].contains("offline"));
+    // ...but not cached, so the next visit retries the cluster.
+    assert!(
+        !app.agg_cache
+            .contains_key(&(Tab::Ssh, "leaf.example".to_owned()))
+    );
+}
+
+#[test]
 fn recordings_aggregate_across_clusters_and_play() {
     // CountingAdmin.select_cluster returns Ok, so the serial recordings
     // fan-out reaches every cluster (Recordings has no cluster flag, so it

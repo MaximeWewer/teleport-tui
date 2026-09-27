@@ -254,7 +254,8 @@ pub(super) fn agg_rows_of(cluster: &str, cells_list: Vec<Vec<String>>) -> Vec<Ag
         .collect()
 }
 
-fn err_row(cluster: String, e: &AppError) -> AggRow {
+/// A placeholder row carrying a cluster's listing error.
+pub(super) fn err_row(cluster: String, e: &AppError) -> AggRow {
     AggRow {
         cluster,
         cells: vec![format!("⚠ {}", e.message())],

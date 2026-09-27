@@ -137,12 +137,10 @@ impl App {
                 Err(e) => self.report(&e),
             },
             JobResult::Aggregate { tab, cluster, rows } => {
-                // An `Err` (offline/network) yields `None` → not cached, retries.
-                let agg = rows.ok().map(|cells| agg_rows_of(&cluster, cells));
-                self.apply_agg_cluster(seq, tab, &cluster, agg);
+                self.apply_agg_result(seq, tab, &cluster, rows);
             }
             JobResult::AggregateAdmin { tab, cluster, rows } => {
-                self.apply_agg_cluster(seq, tab, &cluster, Some(rows));
+                self.apply_agg_cluster(seq, tab, &cluster, rows, true);
             }
             JobResult::RestoreFailed { root, error } => self.report_restore_failed(&root, &error),
             other => self.apply_tab(seq, other),
@@ -160,12 +158,42 @@ impl App {
         ));
     }
 
-    /// Apply one cluster's slice of an all-clusters fan-out. The rows are cached
-    /// per `(tab, cluster)` **unconditionally** (when `Some`) so partial progress
-    /// survives navigating away; the live view is updated only when this slice
+    /// Apply one cluster's slice of a concurrent (`tsh -c`) fan-out. An `Err`
+    /// (offline/network) renders an error row like the admin path, but is not
+    /// cached, so the next visit retries.
+    fn apply_agg_result(
+        &mut self,
+        seq: u64,
+        tab: Tab,
+        cluster: &str,
+        rows: Result<Vec<Vec<String>>, AppError>,
+    ) {
+        match rows {
+            Ok(cells) => {
+                let agg = agg_rows_of(cluster, cells);
+                self.apply_agg_cluster(seq, tab, cluster, agg, true);
+            }
+            Err(e) => {
+                let agg = vec![err_row(cluster.to_owned(), &e)];
+                self.apply_agg_cluster(seq, tab, cluster, agg, false);
+            }
+        }
+    }
+
+    /// Apply one cluster's slice of an all-clusters fan-out. When `cache` is set
+    /// the rows are cached per `(tab, cluster)` regardless of the active view, so
+    /// partial progress survives navigating away (a transient error is not
+    /// cached, so it retries); the live view is updated only when this slice
     /// belongs to the current fan-out (matching `agg_seq` and active `tab`).
-    fn apply_agg_cluster(&mut self, seq: u64, tab: Tab, cluster: &str, rows: Option<Vec<AggRow>>) {
-        if let Some(rows) = &rows {
+    fn apply_agg_cluster(
+        &mut self,
+        seq: u64,
+        tab: Tab,
+        cluster: &str,
+        rows: Vec<AggRow>,
+        cache: bool,
+    ) {
+        if cache {
             self.agg_cache
                 .insert((tab, cluster.to_owned()), rows.clone());
         }
@@ -174,9 +202,7 @@ impl App {
             return;
         }
         self.agg_pending = self.agg_pending.saturating_sub(1);
-        if let Some(rows) = rows {
-            self.agg_rows.extend(rows);
-        }
+        self.agg_rows.extend(rows);
         if self.agg_pending == 0 {
             self.loading = false;
         }

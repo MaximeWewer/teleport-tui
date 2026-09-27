@@ -49,7 +49,7 @@ mod input;
 mod model;
 mod nav;
 mod update;
-use dispatch::{Dispatcher, Job, JobResult, agg_rows_of};
+use dispatch::{Dispatcher, Job, JobResult, agg_rows_of, err_row};
 // Re-exported so the rest of the crate keeps using `crate::app::Tab` etc., and so
 // the sibling child modules' `use super::*` still resolves the model types.
 pub(crate) use model::*;
