@@ -44,7 +44,8 @@ pub fn redact_message(input: &str) -> String {
 /// Returns true for a word that looks like a secret token: long, alphanumeric
 /// (optionally with `_-+/=`), and mixing letters and digits - i.e. high entropy.
 /// Deliberately conservative so it does not mask hostnames (dots), file paths
-/// (slashes plus extensions), or short identifiers.
+/// (slashes plus extensions), or short identifiers. Callers strip surrounding
+/// punctuation and split URLs first (see [`mask_secret_parts`]).
 fn looks_like_secret(word: &str) -> bool {
     const MIN_LEN: usize = 24;
     if word.len() < MIN_LEN {
@@ -61,6 +62,58 @@ fn looks_like_secret(word: &str) -> bool {
         }
     }
     has_alpha && has_digit
+}
+
+/// Characters a bare token can be made of (base64 and hex alphabets).
+fn is_token_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+' | '/' | '=')
+}
+
+/// Characters of one URL path segment / query value / dotted label: the token
+/// alphabet minus the `/` and `=` separators.
+fn is_segment_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+')
+}
+
+/// Mask the secret parts of one whitespace-separated word, keeping the rest.
+/// First the word minus surrounding punctuation/quotes (`"abc…",` → `"***",`);
+/// failing that, each `[A-Za-z0-9_+-]` run on its own, so a secret embedded in
+/// a URL path (`/web/invite/<secret>`) or query (`?token=<secret>`) is masked
+/// while the scheme, host and ordinary path segments stay readable. Runs are
+/// judged by [`looks_like_secret`] alone, so hostnames and normal paths (short,
+/// dotted labels) are untouched.
+fn mask_secret_parts(word: &str) -> String {
+    let start = word.len() - word.trim_start_matches(|c| !is_token_char(c)).len();
+    let end = word.trim_end_matches(|c| !is_token_char(c)).len();
+    if let (Some(pre), Some(core), Some(post)) =
+        (word.get(..start), word.get(start..end), word.get(end..))
+        && looks_like_secret(core)
+    {
+        return format!("{pre}{MASK}{post}");
+    }
+    let mut out = String::with_capacity(word.len());
+    let mut run_start = None;
+    for (i, c) in word.char_indices() {
+        match (is_segment_char(c), run_start) {
+            (true, None) => run_start = Some(i),
+            (true, Some(_)) => {}
+            (false, from) => {
+                if let Some(from) = from {
+                    push_masked(&mut out, word.get(from..i).unwrap_or_default());
+                    run_start = None;
+                }
+                out.push(c);
+            }
+        }
+    }
+    if let Some(from) = run_start {
+        push_masked(&mut out, word.get(from..).unwrap_or_default());
+    }
+    out
+}
+
+fn push_masked(out: &mut String, run: &str) {
+    out.push_str(if looks_like_secret(run) { MASK } else { run });
 }
 
 /// Shared masking pass over whitespace-separated tokens. `entropy` also masks
@@ -86,8 +139,8 @@ fn mask_tokens(cleaned: &str, entropy: bool) -> String {
             out.push(tok.to_owned());
             continue;
         }
-        if entropy && looks_like_secret(tok) {
-            out.push(MASK.to_owned());
+        if entropy {
+            out.push(mask_secret_parts(tok));
             continue;
         }
         out.push(tok.to_owned());
@@ -140,5 +193,64 @@ mod tests {
         // A long alpha-only word (no digits) is not treated as a secret.
         let plain = "authenticationrequiredforthisoperationplease";
         assert_eq!(redact_message(plain), plain);
+    }
+
+    const SECRET: &str = "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6";
+
+    #[test]
+    fn message_masks_quoted_secret() {
+        let masked = redact_message(&format!("token \"{SECRET}\" not found"));
+        assert_eq!(masked, "token \"***\" not found");
+        let masked = redact_message(&format!("token '{SECRET}' not found"));
+        assert_eq!(masked, "token '***' not found");
+    }
+
+    #[test]
+    fn message_masks_secret_before_trailing_punctuation() {
+        assert_eq!(
+            redact_message(&format!("removed {SECRET}, done")),
+            "removed ***, done"
+        );
+        assert_eq!(
+            redact_message(&format!("bad token {SECRET}.")),
+            "bad token ***."
+        );
+        assert_eq!(
+            redact_message(&format!("(token: {SECRET})")),
+            "(token: ***)"
+        );
+    }
+
+    #[test]
+    fn message_masks_secret_in_url_path() {
+        assert_eq!(
+            redact_message(&format!(
+                "open https://proxy.example.com:443/web/invite/{SECRET}"
+            )),
+            "open https://proxy.example.com:443/web/invite/***"
+        );
+    }
+
+    #[test]
+    fn message_masks_secret_in_url_query() {
+        assert_eq!(
+            redact_message(&format!(
+                "GET https://proxy/v1/join?token={SECRET}&x=1 failed"
+            )),
+            "GET https://proxy/v1/join?token=***&x=1 failed"
+        );
+    }
+
+    #[test]
+    fn message_keeps_ordinary_sentences_hosts_and_paths() {
+        for msg in [
+            "Error: \"node-01.root.example.com\" not found.",
+            "dial tcp: lookup ec2-54-123-45-67.eu-west-1.compute.amazonaws.com: no such host",
+            "see https://goteleport.com/docs/admin-guides/management/admin/troubleshooting/",
+            "open /home/user/.tsh/keys/proxy.example.com/alice-x509.pem: permission denied",
+            "access denied to perform action \"list\" on \"token\", retry later.",
+        ] {
+            assert_eq!(redact_message(msg), msg);
+        }
     }
 }
