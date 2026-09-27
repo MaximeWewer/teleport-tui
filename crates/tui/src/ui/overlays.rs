@@ -373,6 +373,104 @@ pub(super) fn render_confirm_user_reset(frame: &mut Frame, app: &App) {
     );
 }
 
+/// When a help row applies on this install.
+#[derive(Clone, Copy)]
+enum HelpGate {
+    Always,
+    /// The installed `tsh` supports this command.
+    Supports(&'static str),
+    /// The tab is visible (capability + rights).
+    TabVisible(Tab),
+    /// The identity has admin (`tctl`) rights.
+    Admin,
+}
+
+/// The fixed keybinding rows of the help overlay (after the tab/navigation
+/// rows, which depend on the visible tabs), each with its gate.
+const HELP_ACTIONS: &[(&str, &str, HelpGate)] = &[
+    (
+        "o",
+        "SSH: options - -L port-forward, -N tunnel, or a one-off command",
+        HelpGate::Always,
+    ),
+    (
+        "F",
+        "list/stop active background SSH forwards (tunnels)",
+        HelpGate::Always,
+    ),
+    (
+        "s",
+        "SSH: scp file/folder transfer (upload or download)",
+        HelpGate::Supports("scp"),
+    ),
+    (
+        "P",
+        "Db: start a local tsh proxy db tunnel for a GUI client",
+        HelpGate::Always,
+    ),
+    (
+        "l / u",
+        "Db/Apps: retrieve / remove certificate (tsh db|apps login/logout)",
+        HelpGate::Always,
+    ),
+    (
+        "e",
+        "Kube: exec a command in a pod (tsh kube login + kube exec)",
+        HelpGate::Always,
+    ),
+    (
+        "Enter",
+        "Recordings: replay the selected session (tsh play; Esc/q stops it)",
+        HelpGate::TabVisible(Tab::Recordings),
+    ),
+    ("c", "switch root / leaf cluster", HelpGate::Always),
+    ("r", "refresh current tab", HelpGate::Always),
+    (
+        "M",
+        "MFA devices: list / add / remove (tsh mfa)",
+        HelpGate::Supports("mfa"),
+    ),
+    (
+        "S",
+        "active sessions: list / join (tsh sessions, join)",
+        HelpGate::Supports("sessions"),
+    ),
+    (
+        "a / d",
+        "Requests: approve / deny selected",
+        HelpGate::TabVisible(Tab::Requests),
+    ),
+    (
+        "D",
+        "Requests: drop (un-assume) selected",
+        HelpGate::TabVisible(Tab::Requests),
+    ),
+    (
+        "n",
+        "Requests: new access request",
+        HelpGate::TabVisible(Tab::Requests),
+    ),
+    (
+        "g / d",
+        "Tokens: generate / remove join token (tctl)",
+        HelpGate::Admin,
+    ),
+    (
+        "n / R",
+        "Users: new user / reset selected user (tctl)",
+        HelpGate::Admin,
+    ),
+    ("L", "login (tsh login)", HelpGate::Always),
+    (
+        "p",
+        "settings - edit & persist default behaviours",
+        HelpGate::Always,
+    ),
+    ("O", "logout (with confirmation)", HelpGate::Always),
+    ("?", "this help", HelpGate::Always),
+    ("q / Esc", "quit", HelpGate::Always),
+];
+
 /// The keybinding rows shown in the help overlay, gated by capabilities/rights.
 fn help_action_rows(
     app: &App,
@@ -389,72 +487,18 @@ fn help_action_rows(
         ("/", "incremental search/filter".to_owned()),
         ("Enter", format!("open: {}", enter_acts.join(" • "))),
     ];
-    rows.push((
-        "o",
-        "SSH: options - -L port-forward, -N tunnel, or a one-off command".to_owned(),
-    ));
-    rows.push((
-        "F",
-        "list/stop active background SSH forwards (tunnels)".to_owned(),
-    ));
-    if app.caps.supports("scp") {
-        rows.push((
-            "s",
-            "SSH: scp file/folder transfer (upload or download)".to_owned(),
-        ));
-    }
-    rows.push((
-        "P",
-        "Db: start a local tsh proxy db tunnel for a GUI client".to_owned(),
-    ));
-    rows.push((
-        "l / u",
-        "Db/Apps: retrieve / remove certificate (tsh db|apps login/logout)".to_owned(),
-    ));
-    rows.push((
-        "e",
-        "Kube: exec a command in a pod (tsh kube login + kube exec)".to_owned(),
-    ));
-    if app.tab_visible(Tab::Recordings) {
-        rows.push((
-            "Enter",
-            "Recordings: replay the selected session (tsh play; Esc/q stops it)".to_owned(),
-        ));
-    }
-    rows.push(("c", "switch root / leaf cluster".to_owned()));
-    rows.push(("r", "refresh current tab".to_owned()));
-    if app.caps.supports("mfa") {
-        rows.push(("M", "MFA devices: list / add / remove (tsh mfa)".to_owned()));
-    }
-    if app.caps.supports("sessions") {
-        rows.push((
-            "S",
-            "active sessions: list / join (tsh sessions, join)".to_owned(),
-        ));
-    }
-    if app.tab_visible(Tab::Requests) {
-        rows.push(("a / d", "Requests: approve / deny selected".to_owned()));
-        rows.push(("D", "Requests: drop (un-assume) selected".to_owned()));
-        rows.push(("n", "Requests: new access request".to_owned()));
-    }
-    if app.admin_allowed {
-        rows.push((
-            "g / d",
-            "Tokens: generate / remove join token (tctl)".to_owned(),
-        ));
-        rows.push((
-            "n / R",
-            "Users: new user / reset selected user (tctl)".to_owned(),
-        ));
-    }
-    rows.push(("L", "login (tsh login)".to_owned()));
-    rows.push((
-        "p",
-        "settings - edit & persist default behaviours".to_owned(),
-    ));
-    rows.push(("O", "logout (with confirmation)".to_owned()));
-    rows.push(("?", "this help".to_owned()));
-    rows.push(("q / Esc", "quit".to_owned()));
+    let applies = |gate: HelpGate| match gate {
+        HelpGate::Always => true,
+        HelpGate::Supports(cmd) => app.caps.supports(cmd),
+        HelpGate::TabVisible(tab) => app.tab_visible(tab),
+        HelpGate::Admin => app.admin_allowed,
+    };
+    rows.extend(
+        HELP_ACTIONS
+            .iter()
+            .filter(|(_, _, gate)| applies(*gate))
+            .map(|&(key, what, _)| (key, what.to_owned())),
+    );
     rows
 }
 
