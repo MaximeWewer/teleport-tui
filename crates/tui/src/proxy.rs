@@ -5,7 +5,7 @@
 //! terminal), an app proxy runs in the **background** while the user works in
 //! their browser; the TUI stays up and stops the proxy on demand.
 
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -241,35 +241,29 @@ fn kube_proxy_attempt(
         .args(cmd::proxy_kube(cluster, kube, user, port))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     let mut child = match spawn_tracked(&mut command) {
         Ok(c) => c,
         Err(e) => return Attempt::Failed(e),
     };
 
-    let Some(stdout) = child.stdout.take() else {
+    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
         stop_child(&mut child);
-        return Attempt::Failed(io::Error::other("proxy stdout unavailable"));
+        return Attempt::Failed(io::Error::other("proxy output unavailable"));
     };
 
-    // Read the proxy's output on a thread; report the kubeconfig path once seen,
-    // then keep draining so the pipe never blocks the proxy.
+    // tsh v18 prints the `export KUBECONFIG=...` hint on stderr (older releases
+    // used stdout), so watch both streams. Each is read on its own thread that
+    // reports the kubeconfig path once seen, then keeps draining so neither pipe
+    // ever blocks the proxy.
     let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let reader = BufReader::new(stdout);
-        let mut sent = false;
-        for line in reader.lines().map_while(Result::ok) {
-            if !sent && let Some(path) = parse_kubeconfig(&line) {
-                let _ = tx.send(path);
-                sent = true;
-            }
-        }
-    });
+    spawn_kubeconfig_reader(stdout, tx.clone());
+    spawn_kubeconfig_reader(stderr, tx);
 
     if let Ok(path) = rx.recv_timeout(Duration::from_secs(8)) {
         return Attempt::Ready((child, path));
     }
-    // A taken port makes tsh exit at once (stdout EOF ends the reader, so the
+    // A taken port makes tsh exit at once (EOF ends both readers, so the
     // recv fails fast); a still-alive child is stuck on something a new port
     // won't fix.
     let exited = matches!(child.try_wait(), Ok(Some(_)));
@@ -383,6 +377,20 @@ fn local_forward_port(spec: &str) -> Option<u16> {
         }
         _ => None,
     }
+}
+
+/// Drain `stream` line by line on a thread, sending the first kubeconfig path
+/// found ([`parse_kubeconfig`]) and discarding everything else.
+fn spawn_kubeconfig_reader(stream: impl Read + Send + 'static, tx: mpsc::Sender<String>) {
+    thread::spawn(move || {
+        let mut sent = false;
+        for line in BufReader::new(stream).lines().map_while(Result::ok) {
+            if !sent && let Some(path) = parse_kubeconfig(&line) {
+                let _ = tx.send(path);
+                sent = true;
+            }
+        }
+    });
 }
 
 /// Extract the path from a `export KUBECONFIG="..."` (or `KUBECONFIG=...`) line.
@@ -604,7 +612,7 @@ fn browser_command(url: &str) -> Command {
 
 #[cfg(test)]
 mod tests {
-    use super::local_forward_port;
+    use super::{local_forward_port, spawn_kubeconfig_reader};
     #[cfg(unix)]
     use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -868,5 +876,26 @@ mod tests {
         assert_eq!(local_forward_port("192.168.1.5:9090:db:5432"), None);
         // Malformed → None.
         assert_eq!(local_forward_port("nonsense"), None);
+    }
+
+    // Verbatim `tsh proxy kube` (v18) output, which arrives on stderr: the
+    // reader must pick the kubeconfig path out of it.
+    #[test]
+    fn kubeconfig_path_is_read_from_tsh_v18_output() {
+        let out = "Preparing the following Teleport Kubernetes clusters:\n\
+            Teleport Cluster Name Kube Cluster Name Context Name\n\
+            \n\
+            Started local proxy for Kubernetes on 127.0.0.1:38765\n\
+            \n\
+            Use the following config for your Kubernetes applications. For example:\n\
+            export KUBECONFIG=\"/home/u/.tsh/keys/c/u-kube/c/localproxy-38765-kubeconfig\"\n\
+            kubectl version\n";
+        let (tx, rx) = std::sync::mpsc::channel();
+        spawn_kubeconfig_reader(std::io::Cursor::new(out), tx);
+        let path = rx.recv_timeout(std::time::Duration::from_secs(5));
+        assert_eq!(
+            path.ok().as_deref(),
+            Some("/home/u/.tsh/keys/c/u-kube/c/localproxy-38765-kubeconfig")
+        );
     }
 }
