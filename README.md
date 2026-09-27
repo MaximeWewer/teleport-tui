@@ -14,6 +14,8 @@ the real client.
 > Runs whatever `tsh`/`tctl` you already have installed and respects your existing login.
 > `tctl` is optional - admin features simply appear when it's available.
 
+![teleport-tui Kubernetes tab](assets/screenshot-kubernetes.png)
+
 ## Why
 
 Driving Teleport from the shell means long commands, per-cluster `-c` flags, copy-pasted
