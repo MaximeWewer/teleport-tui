@@ -112,7 +112,7 @@ cargo run --release
 cargo build --release && ./target/release/teleport-tui
 ```
 
-Needs Rust 1.95+ (pinned via `rust-toolchain.toml`).
+Needs Rust 1.98+ (pinned via `rust-toolchain.toml`).
 
 In every case, `tsh` must be on your `PATH` (or set `tsh_path` in the config); `tctl` is
 optional and enables the admin tabs when present.
