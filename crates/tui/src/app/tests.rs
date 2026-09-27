@@ -383,7 +383,7 @@ fn press(c: char) -> KeyEvent {
 fn bootstrap_loads_topology_and_nodes() {
     let app = test_app();
     assert_eq!(app.topology.as_ref().unwrap().leaves().count(), 1);
-    assert_eq!(app.nodes.len(), 3);
+    assert_eq!(app.lists.nodes.len(), 3);
     assert_eq!(app.visible.len(), 3);
 }
 
@@ -445,7 +445,7 @@ fn apps_enter_requests_open_app() {
     let mut app = test_app();
     app.on_key(press('4')); // -> Apps
     assert_eq!(app.tab, Tab::Apps);
-    assert_eq!(app.apps.len(), 1);
+    assert_eq!(app.lists.apps.len(), 1);
     // Enter opens the port prompt; a typed port is carried through.
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert!(matches!(app.mode, Mode::AppPort { .. }));
@@ -485,7 +485,7 @@ fn db_prompts_user_then_connects() {
     let mut app = test_app();
     app.on_key(press('3')); // -> Databases
     assert_eq!(app.tab, Tab::Db);
-    assert_eq!(app.dbs.len(), 1);
+    assert_eq!(app.lists.dbs.len(), 1);
     app.on_key(KeyEvent::from(KeyCode::Enter)); // -> db user prompt
     assert!(matches!(app.mode, Mode::DbUser { .. }));
     for c in "readonly".chars() {
@@ -665,7 +665,7 @@ fn superseded_scoped_admin_job_skips_its_work() {
         dispatch::run_scoped_if_latest(&repos, &latest, 7, users_job(), &cn("leaf"), &cn("root"));
     assert!(matches!(
         current.as_slice(),
-        [JobResult::List { tab: Tab::Users, result: Ok(Listing::Users(u)) }] if u.len() == 1
+        [JobResult::List { tab: Tab::Users, result: Ok(dispatch::Listing::Users(u)) }] if u.len() == 1
     ));
     assert_eq!(
         *calls.lock().unwrap(),
@@ -1199,13 +1199,13 @@ fn async_path_loads_off_thread_via_tick() {
     app.bootstrap(); // spawns background jobs (status + clusters -> nodes)
     // Pump ticks until the nodes land (fakes are instant; bound the loop).
     let mut spins = 0;
-    while app.nodes.is_empty() && spins < 1000 {
+    while app.lists.nodes.is_empty() && spins < 1000 {
         app.tick();
         // Yield so the worker threads get scheduled (chained: clusters -> nodes).
         std::thread::sleep(std::time::Duration::from_millis(2));
         spins += 1;
     }
-    assert_eq!(app.nodes.len(), 3, "background load did not complete");
+    assert_eq!(app.lists.nodes.len(), 3, "background load did not complete");
     assert!(!app.loading, "loading flag should clear after results land");
     assert_eq!(app.profile.as_ref().unwrap().username, "maxime");
 }
@@ -1256,7 +1256,7 @@ fn admin_users_tab_and_token_generation() {
     let mut app = test_app();
     app.on_key(press('5')); // -> Users
     assert_eq!(app.tab, Tab::Users);
-    assert_eq!(app.users.len(), 1);
+    assert_eq!(app.lists.users.len(), 1);
     // Token generation lives on the Tokens tab only.
     app.on_key(press('8')); // -> Tokens
     assert_eq!(app.tab, Tab::Tokens);
@@ -1571,8 +1571,8 @@ fn prefetch_warms_all_tabs_on_start() {
     // Synchronous bootstrap runs the prefetch inline: every visible tab is
     // loaded and cached, so later switches are instant (no per-tab wait).
     let app = test_app();
-    assert!(!app.nodes.is_empty()); // active tab
-    assert!(!app.kube.is_empty()); // prefetched
+    assert!(!app.lists.nodes.is_empty()); // active tab
+    assert!(!app.lists.kube.is_empty()); // prefetched
     for tab in [
         Tab::Kube,
         Tab::Db,
@@ -1689,9 +1689,9 @@ fn recordings_enter_replays_session() {
     use domain::resource::Resource;
     let mut app = test_app();
     app.switch_tab(Tab::Recordings);
-    assert_eq!(app.recordings.len(), 1);
-    assert_eq!(app.recordings[0].row()[1], "5m29s"); // DURATION column
-    assert_eq!(app.recordings[0].row()[3], "node-01"); // SERVER column
+    assert_eq!(app.lists.recordings.len(), 1);
+    assert_eq!(app.lists.recordings[0].row()[1], "5m29s"); // DURATION column
+    assert_eq!(app.lists.recordings[0].row()[3], "node-01"); // SERVER column
     match app.on_key(KeyEvent::from(KeyCode::Enter)) {
         Outcome::PlayRecording { args, .. } => assert_eq!(args, vec!["play", "sess-0001"]),
         other => panic!("expected PlayRecording, got {other:?}"),
@@ -1811,13 +1811,13 @@ fn bots_and_inventory_tabs_load() {
     let mut app = test_app();
     app.on_key(press('9')); // Bots tab
     assert_eq!(app.tab, Tab::Bots);
-    assert_eq!(app.bots.len(), 1);
-    assert_eq!(app.bots[0].row()[0], "ci");
-    assert_eq!(app.bots[0].row()[3], "12h"); // 43200s formatted
+    assert_eq!(app.lists.bots.len(), 1);
+    assert_eq!(app.lists.bots[0].row()[0], "ci");
+    assert_eq!(app.lists.bots[0].row()[3], "12h"); // 43200s formatted
     app.on_key(press('0')); // Inventory tab
     assert_eq!(app.tab, Tab::Inventory);
-    assert_eq!(app.instances.len(), 1);
-    assert_eq!(app.instances[0].row()[0], "agent-01");
+    assert_eq!(app.lists.instances.len(), 1);
+    assert_eq!(app.lists.instances[0].row()[0], "agent-01");
 }
 
 #[test]
@@ -1826,10 +1826,10 @@ fn tokens_render_like_tctl_plain() {
     let mut app = test_app();
     app.on_key(press('8'));
     assert_eq!(app.tab, Tab::Tokens);
-    assert_eq!(app.tokens.len(), 2);
+    assert_eq!(app.lists.tokens.len(), 2);
     // TOKEN(name)/TYPE/LABELS/EXPIRES, like `tctl tokens ls`. A non-`token`
     // join method's name is a plain identifier and shown as is...
-    let row = app.tokens[0].row();
+    let row = app.lists.tokens[0].row();
     assert_eq!(row[0], "tbot-ci"); // TOKEN = name
     assert_eq!(row[1], "Bot"); // TYPE
     assert_eq!(row[2], "team=ci"); // LABELS
@@ -1837,7 +1837,7 @@ fn tokens_render_like_tctl_plain() {
     // ...but a `token`-method name is the join secret: masked in the table,
     // the detail popup and Debug.
     let secret = "a1b2c3d4e5f6a7b8c9d0";
-    let t = &app.tokens[1];
+    let t = &app.lists.tokens[1];
     assert_eq!(t.row()[0], "a1b2…");
     let shown = format!("{:?} {:?}", t.details(), t);
     assert!(!shown.contains(secret), "join secret leaked: {shown}");
@@ -1850,10 +1850,10 @@ fn tokens_prefetched_at_startup_and_kept_on_leave() {
     // like the other admin tabs, and not scrubbed when leaving the tab.
     assert!(app.cache_key.contains_key(&Tab::Tokens));
     app.on_key(press('8'));
-    assert!(!app.tokens.is_empty());
+    assert!(!app.lists.tokens.is_empty());
     app.on_key(press('1')); // leave to SSH
     assert!(
-        !app.tokens.is_empty(),
+        !app.lists.tokens.is_empty(),
         "listing is not secret; stays cached"
     );
     assert!(app.cache_key.contains_key(&Tab::Tokens));
@@ -1925,11 +1925,11 @@ fn token_rm_opens_confirm_then_cancels() {
 #[test]
 fn logout_clears_all_resources() {
     let mut app = test_app(); // logged in; nodes + topology loaded at bootstrap
-    assert!(!app.nodes.is_empty());
+    assert!(!app.lists.nodes.is_empty());
     assert!(app.topology.is_some());
     // Post-logout status refresh reports no active session → wipe everything.
     app.apply(0, JobResult::Status(Ok(None)));
-    assert!(app.nodes.is_empty());
+    assert!(app.lists.nodes.is_empty());
     assert!(app.topology.is_none());
     assert!(!app.admin_allowed);
     assert!(app.visible.is_empty());
@@ -1998,7 +1998,7 @@ fn requests_tab_approve_and_create() {
     let mut app = test_app();
     app.on_key(press('7')); // -> Requests
     assert_eq!(app.tab, Tab::Requests);
-    assert_eq!(app.requests.len(), 1);
+    assert_eq!(app.lists.requests.len(), 1);
     match app.on_key(press('a')) {
         Outcome::Run { args, .. } => assert_eq!(
             args,

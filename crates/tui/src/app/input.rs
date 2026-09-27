@@ -602,7 +602,7 @@ impl App {
         self.mode = Mode::Normal;
         let Some(name) = self
             .selected_index()
-            .and_then(|i| self.tokens.get(i))
+            .and_then(|i| self.lists.tokens.get(i))
             .map(|t| t.name.clone())
         else {
             return;
@@ -630,7 +630,7 @@ impl App {
     /// Name of the selected user on the Users tab (for `tctl users reset`).
     fn selected_user_name(&self) -> Option<ResourceName> {
         self.selected_index()
-            .and_then(|i| self.users.get(i))
+            .and_then(|i| self.lists.users.get(i))
             .map(|u| u.name.clone())
     }
 

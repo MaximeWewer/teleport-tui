@@ -50,10 +50,12 @@ use crate::forms::{
 mod actions;
 mod dispatch;
 mod input;
+mod listings;
 mod model;
 mod nav;
 mod update;
-use dispatch::{Dispatcher, Job, JobResult, Lane, Listing, agg_rows_of, err_row};
+use dispatch::{Dispatcher, Job, JobResult, Lane, agg_rows_of, err_row};
+use listings::Listings;
 // Re-exported so the rest of the crate keeps using `crate::app::Tab` etc., and so
 // the sibling child modules' `use super::*` still resolves the model types.
 pub(crate) use model::*;
@@ -76,21 +78,8 @@ pub(crate) struct App {
     pub(crate) last_was_auth: bool,
     pub(crate) topology: Option<ClusterTopology>,
     pub(crate) tab: Tab,
-    pub(crate) nodes: Vec<SshNode>,
-    pub(crate) kube: Vec<KubeCluster>,
-    pub(crate) dbs: Vec<Database>,
-    pub(crate) apps: Vec<AppResource>,
-    pub(crate) requests: Vec<AccessRequest>,
-    pub(crate) recordings: Vec<SessionRecording>,
-    pub(crate) users: Vec<AdminUser>,
-    pub(crate) roles: Vec<AdminRole>,
-    /// Provision tokens (Tokens tab): name/type/labels/expiry from
-    /// `tctl tokens ls`. A `token`-method name is the join secret, held in a
-    /// `SecretString` (wiped on drop) and rendered masked.
-    pub(crate) tokens: Vec<ProvisionToken>,
-    /// Machine ID bots (Bots tab) and connected agent instances (Inventory tab).
-    pub(crate) bots: Vec<Bot>,
-    pub(crate) instances: Vec<Instance>,
+    /// The scoped view's per-tab listings.
+    pub(crate) lists: Listings,
     pub(crate) visible: Vec<usize>,
     pub(crate) table: TableState,
 
@@ -246,17 +235,7 @@ impl App {
             last_was_auth: false,
             topology: None,
             tab: Tab::Ssh,
-            nodes: Vec::new(),
-            kube: Vec::new(),
-            dbs: Vec::new(),
-            apps: Vec::new(),
-            requests: Vec::new(),
-            recordings: Vec::new(),
-            users: Vec::new(),
-            roles: Vec::new(),
-            tokens: Vec::new(),
-            bots: Vec::new(),
-            instances: Vec::new(),
+            lists: Listings::default(),
             visible: Vec::new(),
             table: TableState::default(),
             mode: Mode::Normal,
@@ -455,22 +434,6 @@ enum TextEvent {
     Edited,
     Submit,
     Cancel,
-}
-
-/// Indices of `items` kept by the search predicate, preserving order.
-fn indices<T: Resource>(items: &[T], needle: &str, keep: impl Fn(bool) -> bool) -> Vec<usize> {
-    items
-        .iter()
-        .enumerate()
-        .filter(|(_, it)| keep(it.matches(needle)))
-        .map(|(i, _)| i)
-        .collect()
-}
-
-/// Replace a vec's contents and return the new length.
-fn set_vec<T>(dst: &mut Vec<T>, value: Vec<T>) -> usize {
-    *dst = value;
-    dst.len()
 }
 
 /// Clamped index step: stops at the first/last item (no wrap-around). An empty

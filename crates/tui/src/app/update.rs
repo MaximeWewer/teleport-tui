@@ -239,7 +239,7 @@ impl App {
     /// and the load outcome (row count or error). No UI side effects.
     fn store_tab_result(&mut self, result: JobResult) -> (Tab, Result<usize, DomainError>) {
         match result {
-            JobResult::List { tab, result } => (tab, result.map(|l| self.store_listing(l))),
+            JobResult::List { tab, result } => (tab, result.map(|l| self.lists.store(l))),
             JobResult::Clusters(_)
             | JobResult::Status(_)
             | JobResult::Token(_)
@@ -254,23 +254,6 @@ impl App {
             | JobResult::Aggregate { .. }
             | JobResult::RestoreFailed { .. }
             | JobResult::AggregateAdmin { .. } => (self.tab, Ok(0)),
-        }
-    }
-
-    /// Store a typed listing into its tab's vec and return the row count.
-    fn store_listing(&mut self, listing: Listing) -> usize {
-        match listing {
-            Listing::Nodes(v) => set_vec(&mut self.nodes, v),
-            Listing::Kube(v) => set_vec(&mut self.kube, v),
-            Listing::Db(v) => set_vec(&mut self.dbs, v),
-            Listing::Apps(v) => set_vec(&mut self.apps, v),
-            Listing::Requests(v) => set_vec(&mut self.requests, v),
-            Listing::Recordings(v) => set_vec(&mut self.recordings, v),
-            Listing::Users(v) => set_vec(&mut self.users, v),
-            Listing::Roles(v) => set_vec(&mut self.roles, v),
-            Listing::Tokens(v) => set_vec(&mut self.tokens, v),
-            Listing::Bots(v) => set_vec(&mut self.bots, v),
-            Listing::Instances(v) => set_vec(&mut self.instances, v),
         }
     }
 
@@ -506,34 +489,24 @@ impl App {
         } else {
             topo.selected().name.clone()
         };
-        let cells = |list: Vec<Vec<String>>| Some((cluster.clone(), agg_rows_of(&cluster, list)));
-        match tab {
-            Tab::Ssh => cells(self.nodes.iter().map(Resource::row).collect()),
-            Tab::Kube => cells(self.kube.iter().map(Resource::row).collect()),
-            Tab::Db => cells(self.dbs.iter().map(Resource::row).collect()),
-            Tab::Apps => cells(self.apps.iter().map(Resource::row).collect()),
-            Tab::Requests => cells(self.requests.iter().map(Resource::row).collect()),
-            Tab::Users => cells(self.users.iter().map(Resource::row).collect()),
-            Tab::Roles => cells(self.roles.iter().map(Resource::row).collect()),
-            Tab::Tokens => cells(self.tokens.iter().map(Resource::row).collect()),
-            Tab::Bots => cells(self.bots.iter().map(Resource::row).collect()),
-            Tab::Inventory => cells(self.instances.iter().map(Resource::row).collect()),
-            // Recordings carries a per-row sid the plain cells can't reconstruct.
-            Tab::Recordings => {
-                let rows = self
-                    .recordings
-                    .iter()
-                    .map(|r| AggRow {
-                        cluster: cluster.clone(),
-                        cells: r.row(),
-                        login_required: false,
-                        error: false,
-                        sid: Some(r.sid.clone()),
-                    })
-                    .collect();
-                Some((cluster, rows))
-            }
+        // Recordings carries a per-row sid the plain cells can't reconstruct.
+        if tab != Tab::Recordings {
+            let rows = agg_rows_of(&cluster, self.lists.rows(tab));
+            return Some((cluster, rows));
         }
+        let rows = self
+            .lists
+            .recordings
+            .iter()
+            .map(|r| AggRow {
+                cluster: cluster.clone(),
+                cells: r.row(),
+                login_required: false,
+                error: false,
+                sid: Some(r.sid.clone()),
+            })
+            .collect();
+        Some((cluster, rows))
     }
 
     fn online_clusters(&self) -> Option<Vec<ClusterContext>> {
@@ -590,19 +563,7 @@ impl App {
                 .map(|(i, _)| i)
                 .collect()
         } else {
-            match self.tab {
-                Tab::Ssh => indices(&self.nodes, &needle, keep),
-                Tab::Kube => indices(&self.kube, &needle, keep),
-                Tab::Db => indices(&self.dbs, &needle, keep),
-                Tab::Apps => indices(&self.apps, &needle, keep),
-                Tab::Requests => indices(&self.requests, &needle, keep),
-                Tab::Recordings => indices(&self.recordings, &needle, keep),
-                Tab::Users => indices(&self.users, &needle, keep),
-                Tab::Roles => indices(&self.roles, &needle, keep),
-                Tab::Tokens => indices(&self.tokens, &needle, keep),
-                Tab::Bots => indices(&self.bots, &needle, keep),
-                Tab::Inventory => indices(&self.instances, &needle, keep),
-            }
+            self.lists.indices(self.tab, &needle, keep)
         };
         let sel = if self.visible.is_empty() {
             None

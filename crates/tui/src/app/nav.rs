@@ -8,35 +8,13 @@ use super::*;
 
 impl App {
     pub(super) fn clear_active(&mut self) {
-        match self.tab {
-            Tab::Ssh => self.nodes.clear(),
-            Tab::Kube => self.kube.clear(),
-            Tab::Db => self.dbs.clear(),
-            Tab::Apps => self.apps.clear(),
-            Tab::Requests => self.requests.clear(),
-            Tab::Recordings => self.recordings.clear(),
-            Tab::Users => self.users.clear(),
-            Tab::Roles => self.roles.clear(),
-            Tab::Tokens => self.tokens.clear(),
-            Tab::Bots => self.bots.clear(),
-            Tab::Inventory => self.instances.clear(),
-        }
+        self.lists.clear_tab(self.tab);
     }
 
     /// Wipe every cached listing and the topology on logout/expiry, so nothing
     /// from the old session lingers on screen. Returns to the SSH tab.
     pub(super) fn clear_session(&mut self) {
-        self.nodes.clear();
-        self.kube.clear();
-        self.dbs.clear();
-        self.apps.clear();
-        self.requests.clear();
-        self.recordings.clear();
-        self.users.clear();
-        self.roles.clear();
-        self.tokens.clear();
-        self.bots.clear();
-        self.instances.clear();
+        self.lists = Listings::default();
         self.invite_view = None;
         self.mfa_devices.clear();
         self.mfa_sel = 0;
@@ -67,7 +45,7 @@ impl App {
     }
 
     pub(crate) fn selected_node(&self) -> Option<&SshNode> {
-        self.nodes.get(self.selected_index()?)
+        self.lists.nodes.get(self.selected_index()?)
     }
 
     /// Whether a tab is reachable: hidden when the admin group is unreachable
@@ -176,19 +154,7 @@ impl App {
     }
 
     fn active_len(&self) -> usize {
-        match self.tab {
-            Tab::Ssh => self.nodes.len(),
-            Tab::Kube => self.kube.len(),
-            Tab::Db => self.dbs.len(),
-            Tab::Apps => self.apps.len(),
-            Tab::Requests => self.requests.len(),
-            Tab::Recordings => self.recordings.len(),
-            Tab::Users => self.users.len(),
-            Tab::Roles => self.roles.len(),
-            Tab::Tokens => self.tokens.len(),
-            Tab::Bots => self.bots.len(),
-            Tab::Inventory => self.instances.len(),
-        }
+        self.lists.len(self.tab)
     }
 
     pub(super) fn move_selection(&mut self, forward: bool) {

@@ -417,7 +417,7 @@ impl App {
         let (cluster, host) = if self.aggregate {
             self.agg_target::<Hostname>(idx)?
         } else {
-            let host = self.nodes.get(idx)?.hostname.clone();
+            let host = self.lists.nodes.get(idx)?.hostname.clone();
             (self.selected_cluster()?, host)
         };
         Some(NodeTarget { cluster, host })
@@ -439,7 +439,7 @@ impl App {
                 }
                 self.agg_rows.get(idx).and_then(|r| r.sid.clone())
             } else {
-                self.recordings.get(idx).map(|r| r.sid.clone())
+                self.lists.recordings.get(idx).map(|r| r.sid.clone())
             };
             let Some(sid) = sid else {
                 return Outcome::Continue;
@@ -484,11 +484,11 @@ impl App {
             rows
         } else {
             let rows = match self.tab {
-                Tab::Users => self.users.get(idx).map(Resource::details),
-                Tab::Roles => self.roles.get(idx).map(Resource::details),
-                Tab::Tokens => self.tokens.get(idx).map(Resource::details),
-                Tab::Bots => self.bots.get(idx).map(Resource::details),
-                Tab::Inventory => self.instances.get(idx).map(Resource::details),
+                Tab::Users => self.lists.users.get(idx).map(Resource::details),
+                Tab::Roles => self.lists.roles.get(idx).map(Resource::details),
+                Tab::Tokens => self.lists.tokens.get(idx).map(Resource::details),
+                Tab::Bots => self.lists.bots.get(idx).map(Resource::details),
+                Tab::Inventory => self.lists.instances.get(idx).map(Resource::details),
                 _ => None,
             };
             let Some(rows) = rows else {
@@ -806,9 +806,9 @@ impl App {
         }
         let cluster = self.selected_cluster()?;
         let name = match self.tab {
-            Tab::Db => self.dbs.get(idx).map(|d| d.name.clone())?,
-            Tab::Apps => self.apps.get(idx).map(|a| a.name.clone())?,
-            Tab::Kube => self.kube.get(idx).map(|k| k.name.clone())?,
+            Tab::Db => self.lists.dbs.get(idx).map(|d| d.name.clone())?,
+            Tab::Apps => self.lists.apps.get(idx).map(|a| a.name.clone())?,
+            Tab::Kube => self.lists.kube.get(idx).map(|k| k.name.clone())?,
             _ => return None,
         };
         Some((cluster, name))
@@ -927,6 +927,7 @@ impl App {
             return Some((cluster, id, pending));
         }
         let (id, pending) = self
+            .lists
             .requests
             .get(idx)
             .map(|r| (r.id.clone(), r.state.is_pending()))?;
