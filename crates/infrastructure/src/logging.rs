@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use domain::error::ReportableError;
+use domain::port::{ErrorLog, LogLevel};
 use nanoserde::SerJson;
 
 use crate::platform;
@@ -31,7 +32,7 @@ impl ErrorRecord {
     pub fn build(
         layer: &str,
         level: &str,
-        err: &impl ReportableError,
+        err: &(impl ReportableError + ?Sized),
         command: Option<&str>,
         run_id: &str,
     ) -> Self {
@@ -102,12 +103,20 @@ impl NdjsonLogger {
     pub fn report(
         &self,
         layer: &str,
-        err: &impl ReportableError,
+        err: &(impl ReportableError + ?Sized),
         command: Option<&str>,
         run_id: &str,
     ) -> bool {
         let record = ErrorRecord::build(layer, "error", err, command, run_id);
         self.append(&record)
+    }
+}
+
+impl ErrorLog for NdjsonLogger {
+    fn record(&self, layer: &str, level: LogLevel, err: &dyn ReportableError, run_id: &str) {
+        let record = ErrorRecord::build(layer, level.as_str(), err, None, run_id);
+        // Best-effort by contract: a failed write is dropped, never surfaced.
+        let _ = self.append(&record);
     }
 }
 

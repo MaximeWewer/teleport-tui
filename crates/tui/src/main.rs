@@ -107,7 +107,7 @@ fn real_main() -> Result<(), String> {
         auth: Box::new(TshAuthGateway::new(SystemCommandRunner, tsh.clone())),
         admin,
     };
-    let logger = NdjsonLogger::at_default_path();
+    let logger = Box::new(NdjsonLogger::at_default_path());
 
     let kube_tools = if config.kube_tools.is_empty() {
         default_kube_tools()

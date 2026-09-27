@@ -7,6 +7,7 @@ use domain::value::{ClusterName, Hostname, ResourceName, RoleList, TokenTypes};
 fn cn(s: &str) -> ClusterName {
     ClusterName::try_from(s).unwrap()
 }
+use infrastructure::logging::NdjsonLogger;
 use ratatui::crossterm::event::KeyEvent;
 
 #[derive(Debug)]
@@ -339,7 +340,7 @@ fn test_app_with_admin(admin: Box<dyn AdminRepository>) -> App {
 }
 
 fn test_app_with(admin: Box<dyn AdminRepository>, auth: Box<dyn AuthGateway>) -> App {
-    let logger = NdjsonLogger::new(PathBuf::from("/dev/null"));
+    let logger = Box::new(NdjsonLogger::new(PathBuf::from("/dev/null")));
     let repos = test_repos_with(admin, auth);
     // `synchronous = true`: jobs run inline so tests are deterministic.
     let settings = Settings {
@@ -538,7 +539,7 @@ fn kube_picks_user_then_tool_then_opens_auto_proxy() {
 }
 
 fn async_app() -> App {
-    let logger = NdjsonLogger::new(PathBuf::from("/dev/null"));
+    let logger = Box::new(NdjsonLogger::new(PathBuf::from("/dev/null")));
     let repos = Repositories {
         clusters: Box::new(FakeClusters),
         nodes: Box::new(FakeNodes),
@@ -1041,7 +1042,7 @@ fn switching_cluster_invalidates_cache_and_refetches() {
         auth: Box::new(FakeAuth),
         admin: Box::new(FakeAdmin),
     };
-    let logger = NdjsonLogger::new(PathBuf::from("/dev/null"));
+    let logger = Box::new(NdjsonLogger::new(PathBuf::from("/dev/null")));
     let mut app = App::new(
         repos,
         logger,
@@ -1094,7 +1095,7 @@ fn entering_all_clusters_reuses_active_cluster_data() {
         auth: Box::new(FakeAuth),
         admin: Box::new(FakeAdmin),
     };
-    let logger = NdjsonLogger::new(PathBuf::from("/dev/null"));
+    let logger = Box::new(NdjsonLogger::new(PathBuf::from("/dev/null")));
     let mut app = App::new(
         repos,
         logger,
@@ -1146,7 +1147,7 @@ fn switching_tabs_uses_cache_and_r_forces_refetch() {
         auth: Box::new(FakeAuth),
         admin: Box::new(FakeAdmin),
     };
-    let logger = NdjsonLogger::new(PathBuf::from("/dev/null"));
+    let logger = Box::new(NdjsonLogger::new(PathBuf::from("/dev/null")));
     let mut app = App::new(
         repos,
         logger,

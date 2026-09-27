@@ -23,8 +23,9 @@ use domain::error::{DomainError, ReportableError};
 use domain::mfa::MfaDevice;
 use domain::node::SshNode;
 use domain::port::{
-    AdminRepository, AppRepository, AuthGateway, ClusterRepository, DatabaseRepository,
-    KubeRepository, NodeRepository, RecordingRepository, RequestRepository, SessionRepository,
+    AdminRepository, AppRepository, AuthGateway, ClusterRepository, DatabaseRepository, ErrorLog,
+    KubeRepository, LogLevel, NodeRepository, RecordingRepository, RequestRepository,
+    SessionRepository,
 };
 use domain::profile::Profile;
 use domain::recording::SessionRecording;
@@ -37,7 +38,6 @@ use domain::value::{
     SessionId, TokenTypes,
 };
 use infrastructure::config::Config as InfraConfig;
-use infrastructure::logging::{ErrorRecord, NdjsonLogger};
 use infrastructure::redact::redact_message;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::{ListState, TableState};
@@ -69,7 +69,8 @@ pub(crate) struct App {
     tab_req: u64,
     pub(crate) loading: bool,
     pub(crate) spinner: usize,
-    logger: NdjsonLogger,
+    /// Structured error export (injected port; an NDJSON file in production).
+    logger: Box<dyn ErrorLog>,
     run_id: String,
     pub(crate) tsh: PathBuf,
 
@@ -214,7 +215,7 @@ const PREFETCH_BASE: u64 = 1 << 40;
 impl App {
     pub(crate) fn new(
         repos: Repositories,
-        logger: NdjsonLogger,
+        logger: Box<dyn ErrorLog>,
         run_id: String,
         tsh: PathBuf,
         settings: Settings,
@@ -344,8 +345,8 @@ impl App {
     /// [`App::notice`] until the next key press.
     pub(crate) fn warn_startup(&mut self, warnings: &[String]) {
         for w in warnings {
-            let record = ErrorRecord::build("tui", "warn", &StartupWarning(w), None, &self.run_id);
-            let _ = self.logger.append(&record);
+            self.logger
+                .record("tui", LogLevel::Warn, &StartupWarning(w), &self.run_id);
         }
         if !warnings.is_empty() {
             // Config text is user-supplied: strip control chars before display.
@@ -354,7 +355,8 @@ impl App {
     }
 
     fn report(&mut self, err: &impl ReportableError) {
-        let _ = self.logger.report("application", err, None, &self.run_id);
+        self.logger
+            .record("application", LogLevel::Error, err, &self.run_id);
         self.status = Some(format!("[{}] {}", err.code(), err.message()));
     }
 

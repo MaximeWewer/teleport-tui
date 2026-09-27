@@ -6,7 +6,7 @@ use crate::admin::{
 };
 use crate::capability::Capabilities;
 use crate::cluster::{ClusterContext, ClusterTopology};
-use crate::error::DomainError;
+use crate::error::{DomainError, ReportableError};
 use crate::mfa::MfaDevice;
 use crate::node::SshNode;
 use crate::profile::Profile;
@@ -15,6 +15,32 @@ use crate::request::AccessRequest;
 use crate::resource::{App, Database, KubeCluster};
 use crate::session::ActiveSession;
 use crate::value::{ClusterName, ResourceName, RoleList, TokenTypes};
+
+/// Severity of an exported error record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Error,
+    Warn,
+}
+
+impl LogLevel {
+    /// The record's `level` field value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warn => "warn",
+        }
+    }
+}
+
+/// Structured error export (an NDJSON file in production). Best-effort by
+/// contract: a sink that fails to write must not surface that failure, so
+/// callers never branch on logging.
+pub trait ErrorLog: std::fmt::Debug + Send + Sync {
+    /// Record `err`, raised in `layer`, for the run `run_id`.
+    fn record(&self, layer: &str, level: LogLevel, err: &dyn ReportableError, run_id: &str);
+}
 
 /// Probes which top-level commands the installed `tsh` supports, so the UI can
 /// adapt to the actual binary (runtime detection, not compile-time `cfg`).
