@@ -223,6 +223,7 @@ fn admin_cluster_rows(repos: &Repositories, tab: Tab, ctx: &ClusterContext) -> V
                         cluster: cluster.clone(),
                         cells: r.row(),
                         login_required: false,
+                        error: false,
                         sid: Some(r.sid),
                     })
                     .collect(),
@@ -239,6 +240,7 @@ fn admin_cluster_rows(repos: &Repositories, tab: Tab, ctx: &ClusterContext) -> V
                     cluster: cluster.clone(),
                     cells,
                     login_required: false,
+                    error: false,
                     sid: None,
                 })
                 .collect(),
@@ -256,6 +258,7 @@ pub(super) fn agg_rows_of(cluster: &str, cells_list: Vec<Vec<String>>) -> Vec<Ag
             cluster: cluster.to_owned(),
             cells,
             login_required: false,
+            error: false,
             sid: None,
         })
         .collect()
@@ -267,6 +270,7 @@ pub(super) fn err_row(cluster: String, e: &AppError) -> AggRow {
         cluster,
         cells: vec![format!("⚠ {}", e.message())],
         login_required: false,
+        error: true,
         sid: None,
     }
 }
@@ -286,6 +290,7 @@ fn login_required_row(cluster: String) -> AggRow {
         cluster,
         cells: vec!["⚠ not logged in".to_owned()],
         login_required: true,
+        error: false,
         sid: None,
     }
 }

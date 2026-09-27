@@ -203,11 +203,7 @@ impl App {
         // Resolve (cluster, host) from the aggregate row or the scoped node list,
         // so scp targets the node's own cluster even in all-clusters mode.
         let resolved = if self.aggregate {
-            self.agg_rows.get(idx).and_then(|r| {
-                r.cells
-                    .first()
-                    .map(|host| (r.cluster.clone(), host.clone()))
-            })
+            self.agg_target(idx)
         } else {
             self.cluster_arg()
                 .zip(self.nodes.get(idx).map(|n| n.hostname.to_string()))
@@ -239,11 +235,7 @@ impl App {
         // Resolve (cluster, host) from the aggregate row or the scoped node list,
         // so the connection targets the node's own cluster even in all-clusters mode.
         let resolved = if self.aggregate {
-            self.agg_rows.get(idx).and_then(|r| {
-                r.cells
-                    .first()
-                    .map(|host| (r.cluster.clone(), host.clone()))
-            })
+            self.agg_target(idx)
         } else {
             self.cluster_arg()
                 .zip(self.nodes.get(idx).map(|n| n.hostname.to_string()))
@@ -419,6 +411,9 @@ impl App {
             // The sid comes from the aggregate row in all-clusters mode (recorded
             // on the row, not a visible column) or the scoped list otherwise.
             let sid = if self.aggregate {
+                if !self.agg_row_actionable(idx) {
+                    return Outcome::Continue;
+                }
                 self.agg_rows.get(idx).and_then(|r| r.sid.clone())
             } else {
                 self.recordings.get(idx).map(|r| r.sid.clone())
@@ -729,7 +724,10 @@ impl App {
     /// display cells rather than the domain newtypes that produced them, so
     /// re-apply the empty / leading-`-` guard (argument-injection) the newtypes
     /// enforce before the values can reach a `tsh`/`tctl` argument slot.
-    fn agg_target(&self, idx: usize) -> Option<(String, String)> {
+    fn agg_target(&mut self, idx: usize) -> Option<(String, String)> {
+        if !self.agg_row_actionable(idx) {
+            return None;
+        }
         let r = self.agg_rows.get(idx)?;
         let name = r.cells.first()?;
         if r.cluster.is_empty()
@@ -742,10 +740,26 @@ impl App {
         Some((r.cluster.clone(), name.clone()))
     }
 
+    /// Whether the aggregate row at `idx` is a real resource. A placeholder (a
+    /// cluster's listing error or "not logged in") is not: acting on it would
+    /// hand its message text to `tsh` as a name, so say why nothing happens.
+    fn agg_row_actionable(&mut self, idx: usize) -> bool {
+        let Some(r) = self.agg_rows.get(idx).filter(|r| r.is_placeholder()) else {
+            return true;
+        };
+        let msg = if r.login_required {
+            format!("{}: not logged in - press L to log in first", r.cluster)
+        } else {
+            format!("{}: this row is a listing error, not a resource", r.cluster)
+        };
+        self.status = Some(msg);
+        false
+    }
+
     /// (cluster, name) of the highlighted Db/Apps row - from the aggregate row in
     /// all-clusters mode, else the scoped vec + selected cluster. Used by the
     /// cert-lifecycle actions (`l`/`u`), which are gated to those tabs.
-    fn resource_target(&self) -> Option<(String, String)> {
+    fn resource_target(&mut self) -> Option<(String, String)> {
         let idx = self.selected_index()?;
         if self.aggregating() {
             return self.agg_target(idx);
@@ -858,25 +872,40 @@ impl App {
         self.dispatch_aux(Job::GenerateToken(token_type));
     }
 
-    /// Approve/deny the selected request (interactive, audited by Teleport).
-    pub(super) fn review_selected(&mut self, approve: bool) -> Outcome {
-        let Some(idx) = self.selected_index() else {
-            return Outcome::Continue;
-        };
-        let Some((id, pending)) = self
+    /// `(cluster, id, pending)` of the highlighted access request. In
+    /// all-clusters mode the table shows aggregate rows, so the selection indexes
+    /// those (not the scoped `requests` vec) and the row's own cluster applies;
+    /// a placeholder row (listing error) yields nothing.
+    fn request_target(&mut self) -> Option<(String, String, bool)> {
+        let idx = self.selected_index()?;
+        if self.aggregating() {
+            let (cluster, id) = self.agg_target(idx)?;
+            let state_col = AccessRequest::columns()
+                .iter()
+                .position(|c| *c == "STATE")?;
+            let pending = self
+                .agg_rows
+                .get(idx)
+                .and_then(|r| r.cells.get(state_col))
+                .is_some_and(|s| s == RequestState::Pending.label());
+            return Some((cluster, id, pending));
+        }
+        let (id, pending) = self
             .requests
             .get(idx)
-            .map(|r| (r.id.to_string(), r.state.is_pending()))
-        else {
+            .map(|r| (r.id.to_string(), r.state.is_pending()))?;
+        Some((self.cluster_arg()?, id, pending))
+    }
+
+    /// Approve/deny the selected request (interactive, audited by Teleport).
+    pub(super) fn review_selected(&mut self, approve: bool) -> Outcome {
+        let Some((cluster, id, pending)) = self.request_target() else {
             return Outcome::Continue;
         };
         if !pending {
             self.status = Some("only pending requests can be reviewed".to_owned());
             return Outcome::Continue;
         }
-        let Some(cluster) = self.cluster_arg() else {
-            return Outcome::Continue;
-        };
         let action = if approve { "Approving" } else { "Denying" };
         Outcome::Run {
             label: format!("{action} access request {id}…"),
@@ -887,11 +916,7 @@ impl App {
     /// Drop the selected (previously assumed) access request, reverting its
     /// elevated access.
     pub(super) fn drop_selected(&mut self) -> Outcome {
-        let Some(id) = self
-            .selected_index()
-            .and_then(|i| self.requests.get(i))
-            .map(|r| r.id.to_string())
-        else {
+        let Some((_, id, _)) = self.request_target() else {
             return Outcome::Continue;
         };
         Outcome::Run {

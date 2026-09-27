@@ -494,12 +494,20 @@ pub(crate) struct AggRow {
     /// admin fan-out could not reach because it has no active session. Pressing
     /// `L` on it logs into that cluster's proxy; it is not a real resource row.
     pub(crate) login_required: bool,
+    /// True for a placeholder row carrying a cluster's listing error: not a
+    /// resource, so row actions (connect, login, review, ...) must not target it.
+    pub(crate) error: bool,
     /// For an aggregated Recordings row, the session id to `tsh play` (the sid is
     /// not a displayed column). `None` for every other tab.
     pub(crate) sid: Option<String>,
 }
 
 impl AggRow {
+    /// A stand-in for a cluster (error / not logged in), not a real resource.
+    pub(crate) fn is_placeholder(&self) -> bool {
+        self.login_required || self.error
+    }
+
     /// Search matches the primary identifier (first column: hostname/name) only.
     pub(crate) fn matches(&self, needle: &str) -> bool {
         self.cells

@@ -796,6 +796,7 @@ fn aggregate_reuses_cached_clusters_and_fetches_only_missing() {
             cluster: "root.example".to_owned(),
             cells: vec!["alice".to_owned()],
             login_required: false,
+            error: false,
             sid: None,
         }],
     );
@@ -824,6 +825,7 @@ fn agg_slice_caches_per_cluster_even_when_off_tab() {
         cluster: "leaf.example".to_owned(),
         cells: vec!["admin".to_owned()],
         login_required: false,
+        error: false,
         sid: None,
     }];
     app.apply(
@@ -865,6 +867,64 @@ fn aggregate_error_renders_an_error_row_without_caching_it() {
     assert!(
         !app.agg_cache
             .contains_key(&(Tab::Ssh, "leaf.example".to_owned()))
+    );
+}
+
+/// An aggregate view holding only `cluster`'s listing-error row on `tab`, with
+/// that row highlighted.
+fn app_with_error_row(tab: Tab) -> App {
+    let mut app = test_app();
+    app.tab = tab;
+    app.aggregate = true;
+    app.agg_pending = 1;
+    app.apply(
+        app.agg_seq,
+        JobResult::Aggregate {
+            tab,
+            cluster: "leaf.example".to_owned(),
+            rows: Err(DomainError::ClusterOffline {
+                cluster: "leaf.example".to_owned(),
+            }
+            .into()),
+        },
+    );
+    assert!(app.agg_rows[0].error);
+    app.table.select(Some(0));
+    app
+}
+
+#[test]
+fn actions_on_an_aggregate_error_row_are_no_ops_with_a_status() {
+    // SSH: connect (Enter) and the options form (`o`) must not treat the error
+    // text as a hostname.
+    let mut app = app_with_error_row(Tab::Ssh);
+    assert!(matches!(
+        app.on_key(KeyEvent::from(KeyCode::Enter)),
+        Outcome::Continue
+    ));
+    assert!(matches!(app.mode, Mode::Normal));
+    assert!(
+        app.status
+            .as_deref()
+            .is_some_and(|s| s.contains("leaf.example") && s.contains("listing error"))
+    );
+    app.on_key(press('o'));
+    assert!(matches!(app.mode, Mode::Normal));
+
+    // Db: the background proxy / cert login must not start either.
+    let mut app = app_with_error_row(Tab::Db);
+    assert!(matches!(app.on_key(press('P')), Outcome::Continue));
+    assert!(matches!(app.on_key(press('l')), Outcome::Continue));
+
+    // Requests: approve/drop must not fall through to the scoped list at the
+    // same index (a different, real request).
+    let mut app = app_with_error_row(Tab::Requests);
+    assert!(matches!(app.on_key(press('a')), Outcome::Continue));
+    assert!(matches!(app.on_key(press('D')), Outcome::Continue));
+    assert!(
+        app.status
+            .as_deref()
+            .is_some_and(|s| s.contains("listing error"))
     );
 }
 

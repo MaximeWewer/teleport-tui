@@ -27,7 +27,7 @@ use domain::port::{
 };
 use domain::profile::Profile;
 use domain::recording::SessionRecording;
-use domain::request::AccessRequest;
+use domain::request::{AccessRequest, RequestState};
 use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
 use domain::secret::SecretString;
 use domain::session::ActiveSession;

@@ -545,6 +545,7 @@ impl App {
                         cluster: cluster.clone(),
                         cells: r.row(),
                         login_required: false,
+                        error: false,
                         sid: Some(r.sid.clone()),
                     })
                     .collect();
