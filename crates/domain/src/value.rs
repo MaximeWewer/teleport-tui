@@ -75,10 +75,14 @@ string_newtype!(Login, "login", 64, |s: &str| {
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 });
 
-// Names of kube clusters / databases / apps passed to `tsh ... -c`.
+// Names of kube clusters / databases / apps passed to `tsh ... -c`, and of
+// admin users/roles/bots. `@` is allowed because SSO users are usually named
+// by email (`alice@example.com`); it is inert in a positional argv slot (no
+// shell) and these names are never spliced into a `user@host` target. The
+// leading-`-` rule from `is_safe_ident` still applies.
 string_newtype!(ResourceName, "resource_name", 256, |s: &str| {
     s.chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '@'))
 });
 
 // Access-request id (UUID-like) passed to `tsh request show/review`.
@@ -156,5 +160,12 @@ mod tests {
             assert!(Hostname::try_from(bad).is_err(), "should reject {bad:?}");
         }
         assert!(Hostname::try_from("node-01.root.example.com").is_ok());
+    }
+
+    #[test]
+    fn resource_name_accepts_sso_email_usernames() {
+        assert!(ResourceName::try_from("alice@example.com").is_ok());
+        assert!(ResourceName::try_from("-alice@example.com").is_err());
+        assert!(ResourceName::try_from("a@b c").is_err());
     }
 }

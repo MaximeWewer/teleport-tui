@@ -623,6 +623,8 @@ mod tests {
         .unwrap();
         assert_eq!(users.len(), 1);
         assert_eq!(users[0].name.as_str(), "alice");
+        let sso = parse_users(r#"[{"metadata":{"name":"bob@example.com"},"spec":{}}]"#).unwrap();
+        assert_eq!(sso[0].name.as_str(), "bob@example.com");
         let roles =
             parse_roles(r#"[{"metadata":{"name":"bad name"}},{"metadata":{"name":"editor"}}]"#)
                 .unwrap();
