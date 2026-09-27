@@ -32,7 +32,8 @@ use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
 use domain::session::ActiveSession;
 use domain::value::Login;
 use infrastructure::config::Config as InfraConfig;
-use infrastructure::logging::NdjsonLogger;
+use infrastructure::logging::{ErrorRecord, NdjsonLogger};
+use infrastructure::redact::redact_message;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::{ListState, TableState};
 use zeroize::Zeroizing;
@@ -92,6 +93,10 @@ pub(crate) struct App {
     pub(crate) input: String,
     pub(crate) picker: ListState,
     pub(crate) status: Option<String>,
+    /// A start-up warning (bad config value, unusable `tctl_path`, …). Shown in
+    /// place of the status line until the next key press, so the first
+    /// background results can't overwrite it before the user has seen it.
+    pub(crate) notice: Option<String>,
     /// Held only while the generated-token popup is open; scrubbed on dismiss.
     pub(crate) token_view: Option<TokenView>,
     /// Held while the one-time invite/reset URL popup is open; scrubbed on dismiss.
@@ -181,6 +186,21 @@ pub(crate) struct App {
     prefetch_cluster: Option<String>,
 }
 
+/// A non-fatal start-up problem, as a loggable error record.
+struct StartupWarning<'a>(&'a str);
+
+impl ReportableError for StartupWarning<'_> {
+    fn code(&self) -> &'static str {
+        "STARTUP_WARNING"
+    }
+    fn category(&self) -> domain::error::Category {
+        domain::error::Category::Input
+    }
+    fn message(&self) -> String {
+        self.0.to_owned()
+    }
+}
+
 /// Background-prefetch sequence numbers start here, disjoint from `tab_req`
 /// (which counts active-tab loads), so `apply_tab` can tell them apart.
 const PREFETCH_BASE: u64 = 1 << 40;
@@ -237,6 +257,7 @@ impl App {
             input: String::new(),
             picker: ListState::default(),
             status: None,
+            notice: None,
             token_view: None,
             invite_view: None,
             mfa_devices: Vec::new(),
@@ -311,6 +332,19 @@ impl App {
             .get(self.spinner % SPINNER.len())
             .copied()
             .unwrap_or('⠋')
+    }
+
+    /// Surface start-up warnings: each is logged, and all are shown as the
+    /// [`App::notice`] until the next key press.
+    pub(crate) fn warn_startup(&mut self, warnings: &[String]) {
+        for w in warnings {
+            let record = ErrorRecord::build("tui", "warn", &StartupWarning(w), None, &self.run_id);
+            let _ = self.logger.append(&record);
+        }
+        if !warnings.is_empty() {
+            // Config text is user-supplied: strip control chars before display.
+            self.notice = Some(format!("⚠ {}", redact_message(&warnings.join(" · "))));
+        }
     }
 
     fn report(&mut self, err: &impl ReportableError) {

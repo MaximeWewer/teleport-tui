@@ -58,6 +58,8 @@ impl App {
     pub(crate) fn on_key(&mut self, key: KeyEvent) -> Outcome {
         // Reset before dispatch; only login/logout set it back to true.
         self.last_was_auth = false;
+        // A start-up notice stays up until the user's first key press.
+        self.notice = None;
         // Clone the mode for dispatch: it isn't `Copy` (some variants own data),
         // and a couple of arms below reassign `self.mode`. Dispatch only routes on
         // the variant; each handler re-reads the carried data from `self.mode`.

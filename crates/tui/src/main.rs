@@ -73,10 +73,18 @@ fn main() -> ExitCode {
 }
 
 fn real_main() -> Result<(), String> {
-    let config = Config::load_default();
+    let (config, mut warnings) = Config::load_default_with_warnings();
     let tsh: PathBuf = locate_tsh(config.tsh_path.clone()).map_err(|e| e.to_string())?;
-    // tctl is optional - admin features degrade gracefully if it's absent.
+    // tctl is optional - admin features degrade gracefully if it's absent. But
+    // an explicit `tctl_path` that doesn't resolve is a config mistake: warn
+    // instead of letting the admin features silently vanish.
     let tctl: Option<PathBuf> = locate_tctl(config.tctl_path.clone()).ok();
+    if let (None, Some(p)) = (&tctl, &config.tctl_path) {
+        warnings.push(format!(
+            "tctl_path `{}` is not an absolute path to an existing file: admin features disabled",
+            p.display()
+        ));
+    }
     let admin: Box<dyn AdminRepository> = match &tctl {
         Some(path) => Box::new(TctlAdminRepository::new(
             SystemCommandRunner,
@@ -124,6 +132,7 @@ fn real_main() -> Result<(), String> {
         capabilities: TshCapabilityProbe::new(SystemCommandRunner, tsh.clone()).probe(),
     };
     let mut application = App::new(repos, logger, run_id(), tsh, settings, false);
+    application.warn_startup(&warnings);
     application.bootstrap();
 
     let refresh = config.refresh_seconds.map(Duration::from_secs);

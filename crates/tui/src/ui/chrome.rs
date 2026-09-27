@@ -105,7 +105,12 @@ pub(super) fn render_status(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut lines = vec![Line::from(spans)];
     lines.push(profile_line(app));
-    if app.loading {
+    if let Some(notice) = &app.notice {
+        lines.push(Line::from(Span::styled(
+            notice.clone(),
+            Style::default().fg(Color::Yellow),
+        )));
+    } else if app.loading {
         lines.push(Line::from(Span::styled(
             format!("{} loading…", app.spinner_frame()),
             Style::default().fg(Color::Yellow),

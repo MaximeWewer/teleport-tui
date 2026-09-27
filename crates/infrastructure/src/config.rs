@@ -1,6 +1,8 @@
 //! Optional user config (`config.toml`). Deliberately a tiny hand-rolled
 //! flat `key = value` parser - no TOML dependency (attack-surface constraint).
-//! Unknown keys are ignored; a missing/unreadable file yields defaults.
+//! Unknown keys and invalid values are ignored (defaults apply) but reported as
+//! warnings; a missing file yields defaults silently, an unreadable one with a
+//! warning.
 
 use std::path::{Path, PathBuf};
 
@@ -50,20 +52,55 @@ impl Config {
 
     #[must_use]
     pub fn load(path: &Path) -> Self {
-        std::fs::read_to_string(path)
-            .map(|s| Self::parse(&s))
-            .unwrap_or_default()
+        Self::load_with_warnings(path).0
+    }
+
+    /// Like [`Config::load_default`], plus a human-readable warning for every
+    /// ignored line/key/value (see [`Config::parse_with_warnings`]).
+    #[must_use]
+    pub fn load_default_with_warnings() -> (Self, Vec<String>) {
+        Self::load_with_warnings(&platform::config_path())
+    }
+
+    /// Like [`Config::load`], plus warnings. A missing file is the normal
+    /// "no config" case and is not a warning; any other read error is.
+    #[must_use]
+    pub fn load_with_warnings(path: &Path) -> (Self, Vec<String>) {
+        match std::fs::read_to_string(path) {
+            Ok(s) => Self::parse_with_warnings(&s),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Self::default(), Vec::new()),
+            Err(e) => (
+                Self::default(),
+                vec![format!(
+                    "could not read config {}: {e} (using defaults)",
+                    path.display()
+                )],
+            ),
+        }
     }
 
     #[must_use]
     pub fn parse(contents: &str) -> Self {
+        Self::parse_with_warnings(contents).0
+    }
+
+    /// Parse, also returning a warning for each malformed line, unknown key or
+    /// invalid value (all of which are otherwise ignored), so a typo doesn't
+    /// silently fall back to the default.
+    #[must_use]
+    pub fn parse_with_warnings(contents: &str) -> (Self, Vec<String>) {
         let mut cfg = Self::default();
-        for raw in contents.lines() {
+        let mut warnings = Vec::new();
+        for (idx, raw) in contents.lines().enumerate() {
+            let lineno = idx + 1;
             let line = raw.trim();
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
             let Some((key, value)) = line.split_once('=') else {
+                warnings.push(format!(
+                    "config line {lineno} ignored: expected `key = value`"
+                ));
                 continue;
             };
             let key = key.trim();
@@ -71,7 +108,13 @@ impl Config {
             match key {
                 "tsh_path" if !value.is_empty() => cfg.tsh_path = Some(PathBuf::from(value)),
                 "tctl_path" if !value.is_empty() => cfg.tctl_path = Some(PathBuf::from(value)),
-                "refresh_seconds" => cfg.refresh_seconds = value.parse().ok().filter(|n| *n > 0),
+                // 0 is valid (disables auto-refresh); anything unparsable is not.
+                "refresh_seconds" => match value.parse::<u64>() {
+                    Ok(n) => cfg.refresh_seconds = Some(n).filter(|n| *n > 0),
+                    Err(_) => warnings.push(format!(
+                        "config line {lineno}: invalid refresh_seconds `{value}` (expected whole seconds), auto-refresh disabled"
+                    )),
+                },
                 "kube_tools" => {
                     cfg.kube_tools = value
                         .split(',')
@@ -88,10 +131,13 @@ impl Config {
                 }
                 "kube_user" if !value.is_empty() => cfg.kube_user = Some(value.to_owned()),
                 "db_user" if !value.is_empty() => cfg.db_user = Some(value.to_owned()),
-                _ => {}
+                // A known key with an empty value just keeps the default.
+                "tsh_path" | "tctl_path" | "proxy" | "user" | "auth" | "mfa" | "default_login"
+                | "kube_user" | "db_user" => {}
+                _ => warnings.push(format!("config line {lineno}: unknown key `{key}` ignored")),
             }
         }
-        cfg
+        (cfg, warnings)
     }
 }
 
@@ -190,6 +236,33 @@ mod tests {
         assert_eq!(cfg.tsh_path, Some(PathBuf::from("/opt/tsh")));
         assert_eq!(cfg.tctl_path, Some(PathBuf::from("/opt/tctl")));
         assert_eq!(cfg.refresh_seconds, Some(30));
+    }
+
+    #[test]
+    fn warns_about_unknown_keys_bad_values_and_malformed_lines() {
+        let (cfg, warnings) = Config::parse_with_warnings(
+            "# ok\nrefersh_seconds = 30\nrefresh_seconds = soon\njust text\nproxy = \"\"\nuser = \"me\"\n",
+        );
+        assert_eq!(cfg.refresh_seconds, None);
+        assert_eq!(cfg.user.as_deref(), Some("me"));
+        assert_eq!(warnings.len(), 3, "{warnings:?}");
+        assert!(warnings[0].contains("refersh_seconds"));
+        assert!(warnings[1].contains("soon"));
+        assert!(warnings[2].contains("line 4"));
+        // A valid file, including `refresh_seconds = 0` (disabled), is quiet.
+        assert!(
+            Config::parse_with_warnings("refresh_seconds = 0\n")
+                .1
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn missing_file_is_not_a_warning() {
+        let (cfg, warnings) =
+            Config::load_with_warnings(Path::new("/nonexistent/teleport-tui.toml"));
+        assert_eq!(cfg, Config::default());
+        assert!(warnings.is_empty());
     }
 
     #[test]
