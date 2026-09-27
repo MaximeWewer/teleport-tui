@@ -246,11 +246,22 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
     }
 }
 
+/// Messages a `tsh` (v18) login emits when it needs to prompt but has no
+/// terminal. Taken verbatim from the tsh binary's own strings, not guessed:
+/// the error its prompt package returns when stdin is not a tty (password /
+/// OTP prompts), its relogin guard, and Go's `ENOTTY` text from a failed
+/// raw-mode switch.
+const NO_TTY_LOGIN_ERRORS: &[&str] = &[
+    "underlying reader is not a terminal",
+    "cannot relogin in non-interactive session",
+    "inappropriate ioctl for device",
+];
+
 /// Whether a failed `tsh login` stderr shows it wanted to prompt the user
 /// (password / MFA / SSO), i.e. only an interactive login can fix it.
 fn needs_interactive_login(stderr: &str) -> bool {
     let s = stderr.to_lowercase();
-    s.contains("not a terminal") || s.contains("inappropriate ioctl") || s.contains("password")
+    NO_TTY_LOGIN_ERRORS.iter().any(|m| s.contains(m))
 }
 
 #[derive(DeJson)]
@@ -551,9 +562,21 @@ mod tests {
             select_with("ERROR: not logged in"),
             DomainError::NotAuthenticated
         ));
+        for no_tty in [
+            "ERROR: underlying reader is not a terminal",
+            "ERROR: cannot relogin in non-interactive session",
+            "ERROR: inappropriate ioctl for device",
+        ] {
+            assert!(
+                matches!(select_with(no_tty), DomainError::NotAuthenticated),
+                "{no_tty:?} should read as login required"
+            );
+        }
+        // A server-side error that merely mentions a password is not a prompt
+        // tsh couldn't show: keep its detail instead of hiding it as "login".
         assert!(matches!(
-            select_with("ERROR: underlying reader is not a terminal"),
-            DomainError::NotAuthenticated
+            select_with("ERROR: password authentication is disabled for this cluster"),
+            DomainError::Backend { .. }
         ));
         assert!(matches!(
             select_with("ERROR: your certificate has expired"),
