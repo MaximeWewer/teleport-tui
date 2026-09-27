@@ -628,10 +628,10 @@ impl App {
     }
 
     /// Name of the selected user on the Users tab (for `tctl users reset`).
-    fn selected_user_name(&self) -> Option<String> {
+    fn selected_user_name(&self) -> Option<ResourceName> {
         self.selected_index()
             .and_then(|i| self.users.get(i))
-            .map(|u| u.name.to_string())
+            .map(|u| u.name.clone())
     }
 
     fn on_key_add_user(&mut self, key: KeyEvent) -> Outcome {
@@ -659,22 +659,18 @@ impl App {
     /// [`JobResult::Invite`] and is shown in a one-time popup.
     fn submit_add_user(&mut self) -> Outcome {
         let f = self.add_user_form.clone();
-        let user = f.username.trim();
-        let roles = f.roles.trim();
-        if !valid_user(user) {
-            self.report(&DomainError::InvalidValue { field: "user" });
-            return Outcome::Continue;
-        }
-        if !valid_roles(roles) {
-            self.report(&DomainError::InvalidValue { field: "roles" });
-            return Outcome::Continue;
-        }
+        let parsed = ResourceName::try_from(f.username.trim())
+            .and_then(|user| Ok((user, RoleList::try_from(f.roles.trim())?)));
+        let (user, roles) = match parsed {
+            Ok(v) => v,
+            Err(e) => {
+                self.report(&e);
+                return Outcome::Continue;
+            }
+        };
         self.mode = Mode::Normal;
         self.status = Some(format!("creating user {user}…"));
-        self.dispatch_aux(Job::AddUser {
-            user: user.to_owned(),
-            roles: roles.to_owned(),
-        });
+        self.dispatch_aux(Job::AddUser { user, roles });
         Outcome::Continue
     }
 
@@ -692,10 +688,6 @@ impl App {
         let Mode::ConfirmUserReset(user) = std::mem::replace(&mut self.mode, Mode::Normal) else {
             return;
         };
-        if !valid_user(&user) {
-            self.report(&DomainError::InvalidValue { field: "user" });
-            return;
-        }
         self.status = Some(format!("resetting {user}…"));
         self.dispatch_aux(Job::ResetUser(user));
     }

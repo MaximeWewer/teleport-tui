@@ -16,6 +16,7 @@ use domain::recording::SessionRecording;
 use domain::request::AccessRequest;
 use domain::resource::{App, Database, KubeCluster};
 use domain::session::ActiveSession;
+use domain::value::{ResourceName, RoleList, TokenTypes};
 
 use crate::error::AppError;
 
@@ -149,7 +150,7 @@ impl<'a> GenerateToken<'a> {
 
     /// # Errors
     /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, token_type: &str) -> Result<GeneratedToken, AppError> {
+    pub fn execute(&self, token_type: &TokenTypes) -> Result<GeneratedToken, AppError> {
         Ok(self.repo.generate_token(token_type)?)
     }
 }
@@ -210,7 +211,7 @@ impl<'a> AddUser<'a> {
 
     /// # Errors
     /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, user: &str, roles: &str) -> Result<InviteLink, AppError> {
+    pub fn execute(&self, user: &ResourceName, roles: &RoleList) -> Result<InviteLink, AppError> {
         Ok(self.repo.add_user(user, roles)?)
     }
 }
@@ -230,7 +231,7 @@ impl<'a> ResetUser<'a> {
 
     /// # Errors
     /// Propagates repository failures as [`AppError`].
-    pub fn execute(&self, user: &str) -> Result<InviteLink, AppError> {
+    pub fn execute(&self, user: &ResourceName) -> Result<InviteLink, AppError> {
         Ok(self.repo.reset_user(user)?)
     }
 }

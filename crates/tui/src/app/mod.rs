@@ -31,7 +31,7 @@ use domain::request::{AccessRequest, RequestState};
 use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
 use domain::secret::SecretString;
 use domain::session::ActiveSession;
-use domain::value::Login;
+use domain::value::{ClusterName, Login, ResourceName, RoleList, TokenTypes};
 use infrastructure::config::Config as InfraConfig;
 use infrastructure::logging::{ErrorRecord, NdjsonLogger};
 use infrastructure::redact::redact_message;
@@ -42,7 +42,7 @@ use zeroize::Zeroizing;
 use crate::forms::{
     AUTH_OPTIONS, AddUserForm, KubeExecForm, LoginForm, MFA_OPTIONS, ScpForm, SettingsForm,
     SshOptionsForm, forward_binds_all_interfaces, opt_index, valid_command, valid_forward,
-    valid_path, valid_roles, valid_token_type, valid_user,
+    valid_path, valid_user,
 };
 
 mod actions;
@@ -157,16 +157,16 @@ pub(crate) struct App {
     /// navigating away - on return, cached clusters render instantly and only the
     /// missing ones are re-fetched (no restart from zero). Cleared per-cluster on
     /// login, per-tab on `r`, and wholesale on topology change / logout.
-    agg_cache: HashMap<(Tab, String), Vec<AggRow>>,
+    agg_cache: HashMap<(Tab, ClusterName), Vec<AggRow>>,
     /// Set when an all-clusters admin login (`L` on a login-required row) just
     /// switched the active profile to a leaf. The next [`Self::after_action`]
     /// re-selects this (root) proxy *before* refetching clusters/status, so the
     /// topology isn't re-read from the leaf's narrower viewpoint.
-    pending_root_restore: Option<String>,
+    pending_root_restore: Option<ClusterName>,
     /// Root proxy to restore after the login form (opened via `L` on a
     /// login-required leaf row) is submitted; carries the intent from opening the
     /// form to [`Self::submit_login`]. `None` for a normal login.
-    relogin_root: Option<String>,
+    relogin_root: Option<ClusterName>,
     /// Whether the current identity has admin rights (probed via `tctl`). When
     /// false, the whole Admin menu group (Users/Roles/Requests) is hidden.
     pub(crate) admin_allowed: bool,

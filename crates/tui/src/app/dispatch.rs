@@ -38,12 +38,12 @@ pub(super) enum Job {
     RemoveToken(SecretString),
     /// Create a user with roles (`tctl users add`) → one-time invite URL.
     AddUser {
-        user: String,
-        roles: String,
+        user: ResourceName,
+        roles: RoleList,
     },
     /// Reset a user's credentials (`tctl users reset`) → one-time reset URL.
-    ResetUser(String),
-    GenerateToken(String),
+    ResetUser(ResourceName),
+    GenerateToken(TokenTypes),
     /// Probe whether the current identity has `tctl` admin rights.
     AdminProbe,
     /// Aggregate one tab's listing for a single cluster (rows tagged on apply).
@@ -81,7 +81,7 @@ pub(super) enum JobResult {
     /// `cluster` so it caches per-cluster even after the user navigates away.
     Aggregate {
         tab: Tab,
-        cluster: String,
+        cluster: ClusterName,
         rows: Result<Vec<Vec<String>>, AppError>,
     },
     /// One cluster's slice of a serial admin/recordings fan-out (its rows, or a
@@ -89,14 +89,14 @@ pub(super) enum JobResult {
     /// caches per-cluster so partial progress survives navigation.
     AggregateAdmin {
         tab: Tab,
-        cluster: String,
+        cluster: ClusterName,
         rows: Vec<AggRow>,
     },
     /// Re-selecting the root profile after a leaf-scoped operation failed, so
     /// `~/.tsh` may still point at a leaf. Surfaced (status bar + error log)
     /// instead of dropped: every later `tsh`/`tctl` call would read the leaf.
     RestoreFailed {
-        root: String,
+        root: ClusterName,
         error: AppError,
     },
 }
@@ -143,9 +143,12 @@ fn run_job(repos: &Repositories, job: Job) -> JobResult {
             Err(e) => JobResult::AdminProbeFailed(e.into()),
         },
         Job::Aggregate { tab, ctx } => {
-            let cluster = ctx.name.to_string();
             let rows = aggregate_rows(repos, tab, &ctx);
-            JobResult::Aggregate { tab, cluster, rows }
+            JobResult::Aggregate {
+                tab,
+                cluster: ctx.name,
+                rows,
+            }
         }
     }
 }
@@ -176,7 +179,7 @@ fn failed_job(job: Job, e: AppError) -> JobResult {
         Job::AdminProbe => JobResult::AdminProbeFailed(e),
         Job::Aggregate { tab, ctx } => JobResult::Aggregate {
             tab,
-            cluster: ctx.name.to_string(),
+            cluster: ctx.name,
             rows: Err(e),
         },
     }
@@ -186,7 +189,12 @@ fn failed_job(job: Job, e: AppError) -> JobResult {
 /// switch fails the job is not run (it would read whatever cluster the profile
 /// is on) and its error result is returned instead. A failed restore adds a
 /// [`JobResult::RestoreFailed`] after the job's result.
-fn run_scoped(repos: &Repositories, job: Job, cluster: &str, root: &str) -> Vec<JobResult> {
+fn run_scoped(
+    repos: &Repositories,
+    job: Job,
+    cluster: &ClusterName,
+    root: &ClusterName,
+) -> Vec<JobResult> {
     let result = match repos.admin.select_cluster(cluster) {
         Ok(()) => run_job(repos, job),
         Err(e) => failed_job(job, e.into()),
@@ -206,8 +214,8 @@ pub(super) fn run_scoped_if_latest(
     latest: &AtomicU64,
     seq: u64,
     job: Job,
-    cluster: &str,
-    root: &str,
+    cluster: &ClusterName,
+    root: &ClusterName,
 ) -> Vec<JobResult> {
     if latest.load(Ordering::Acquire) != seq {
         return Vec::new();
@@ -216,13 +224,13 @@ pub(super) fn run_scoped_if_latest(
 }
 
 /// Re-select the `root` profile; `Some(RestoreFailed)` if that fails.
-fn restore_root(repos: &Repositories, root: &str) -> Option<JobResult> {
+fn restore_root(repos: &Repositories, root: &ClusterName) -> Option<JobResult> {
     repos
         .admin
         .select_cluster(root)
         .err()
         .map(|e| JobResult::RestoreFailed {
-            root: root.to_owned(),
+            root: root.clone(),
             error: e.into(),
         })
 }
@@ -234,7 +242,7 @@ fn restore_root(repos: &Repositories, root: &str) -> Option<JobResult> {
 /// race). A cluster without a live session yields a single `login_required`
 /// placeholder; any other switch failure yields an error row.
 fn admin_cluster_rows(repos: &Repositories, tab: Tab, ctx: &ClusterContext) -> Vec<AggRow> {
-    let cluster = ctx.name.to_string();
+    let cluster = ctx.name.clone();
     // Recordings carries a per-row sid (for `tsh play`); the admin tabs don't.
     if tab == Tab::Recordings {
         return match repos.admin.select_cluster(&cluster) {
@@ -273,11 +281,11 @@ fn admin_cluster_rows(repos: &Repositories, tab: Tab, ctx: &ClusterContext) -> V
 }
 
 /// Tag a cluster's plain display rows as `AggRow`s (concurrent resource path).
-pub(super) fn agg_rows_of(cluster: &str, cells_list: Vec<Vec<String>>) -> Vec<AggRow> {
+pub(super) fn agg_rows_of(cluster: &ClusterName, cells_list: Vec<Vec<String>>) -> Vec<AggRow> {
     cells_list
         .into_iter()
         .map(|cells| AggRow {
-            cluster: cluster.to_owned(),
+            cluster: cluster.clone(),
             cells,
             login_required: false,
             error: false,
@@ -287,7 +295,7 @@ pub(super) fn agg_rows_of(cluster: &str, cells_list: Vec<Vec<String>>) -> Vec<Ag
 }
 
 /// A placeholder row carrying a cluster's listing error.
-pub(super) fn err_row(cluster: String, e: &AppError) -> AggRow {
+pub(super) fn err_row(cluster: ClusterName, e: &AppError) -> AggRow {
     AggRow {
         cluster,
         cells: vec![format!("⚠ {}", e.message())],
@@ -300,14 +308,14 @@ pub(super) fn err_row(cluster: String, e: &AppError) -> AggRow {
 /// The placeholder for a cluster whose profile could not be selected: a
 /// login-required row (actionable with `L`) when only a fresh login can fix it,
 /// otherwise the real error (network, backend, …).
-fn select_failed_row(cluster: String, e: DomainError) -> AggRow {
+fn select_failed_row(cluster: ClusterName, e: DomainError) -> AggRow {
     match e {
         DomainError::NotAuthenticated | DomainError::CertExpired => login_required_row(cluster),
         e => err_row(cluster, &e.into()),
     }
 }
 
-fn login_required_row(cluster: String) -> AggRow {
+fn login_required_row(cluster: ClusterName) -> AggRow {
     AggRow {
         cluster,
         cells: vec!["⚠ not logged in".to_owned()],
@@ -595,8 +603,8 @@ impl Dispatcher {
         &self,
         seq: u64,
         job: Job,
-        cluster: String,
-        root: String,
+        cluster: ClusterName,
+        root: ClusterName,
     ) -> Vec<(u64, JobResult)> {
         if self.synchronous {
             return run_scoped_if_latest(
@@ -643,7 +651,7 @@ impl Dispatcher {
         seq: u64,
         tab: Tab,
         clusters: Vec<ClusterContext>,
-        root: String,
+        root: ClusterName,
     ) -> Vec<(u64, JobResult)> {
         if self.synchronous {
             let mut out = Vec::new();
@@ -654,7 +662,7 @@ impl Dispatcher {
                     seq,
                     JobResult::AggregateAdmin {
                         tab,
-                        cluster: ctx.name.to_string(),
+                        cluster: ctx.name.clone(),
                         rows,
                     },
                 ));
@@ -667,7 +675,7 @@ impl Dispatcher {
         let profile_lock = Arc::clone(&self.profile_lock);
         std::thread::spawn(move || {
             for ctx in &clusters {
-                let cluster = ctx.name.to_string();
+                let cluster = ctx.name.clone();
                 // Hold the profile lock across the whole switch→read→restore, so a
                 // second concurrent fan-out (or a `spawn_after_action` restore)
                 // can't flip the global profile mid-listing and make this `tctl`
@@ -705,12 +713,12 @@ impl Dispatcher {
     /// [`profile_lock`]: Dispatcher::profile_lock
     pub(super) fn spawn_after_action(
         &self,
-        restore_root: Option<String>,
+        restore_root: Option<ClusterName>,
         reload_topology: bool,
     ) -> Vec<(u64, JobResult)> {
         if self.synchronous {
             let failed = restore_root
-                .as_deref()
+                .as_ref()
                 .and_then(|root| self::restore_root(&self.repos, root));
             let mut out = vec![(0, run_job(&self.repos, Job::Status))];
             if reload_topology {

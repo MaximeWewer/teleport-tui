@@ -19,7 +19,7 @@ use domain::admin::{
 use domain::error::DomainError;
 use domain::port::AdminRepository;
 use domain::secret::SecretString;
-use domain::value::{ClusterName, ResourceName};
+use domain::value::{ClusterName, ResourceName, RoleList, TokenTypes};
 use nanoserde::DeJson;
 use zeroize::Zeroizing;
 
@@ -88,7 +88,7 @@ impl<R: CommandRunner> TctlAdminRepository<R> {
     }
 
     /// Run a `users add`/`reset` command and extract the one-time setup URL.
-    fn invite(&self, user: &str, req: &CommandRequest) -> Result<InviteLink, DomainError> {
+    fn invite(&self, user: &ResourceName, req: &CommandRequest) -> Result<InviteLink, DomainError> {
         let outcome = self.runner.run(req).map_err(|e| DomainError::Backend {
             code: "TCTL_SPAWN_FAILED",
             detail: e.to_string(),
@@ -98,7 +98,7 @@ impl<R: CommandRunner> TctlAdminRepository<R> {
         }
         // stdout embeds the secret setup URL → scrub once it is extracted.
         let stdout = Zeroizing::new(outcome.stdout);
-        parse_invite(user, &stdout)
+        parse_invite(user.as_str(), &stdout)
     }
 }
 
@@ -140,25 +140,26 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
         run_cli(&self.runner, &self.tctl, args, "TCTL_SPAWN_FAILED").map(|_| ())
     }
 
-    fn add_user(&self, user: &str, roles: &str) -> Result<InviteLink, DomainError> {
-        // `user` is a positional argv element (validated upstream); roles use the
-        // `--roles=` form so a value can't be reparsed as a flag. No shell.
+    fn add_user(&self, user: &ResourceName, roles: &RoleList) -> Result<InviteLink, DomainError> {
+        // `user` is a positional argv element (a `ResourceName`, so never
+        // flag-like); roles use the `--roles=` form so a value can't be reparsed
+        // as a flag. No shell.
         let req = CommandRequest::new(
             self.tctl.clone(),
             vec![
                 "users".to_owned(),
                 "add".to_owned(),
-                user.to_owned(),
+                user.to_string(),
                 format!("--roles={roles}"),
             ],
         );
         self.invite(user, &req)
     }
 
-    fn reset_user(&self, user: &str) -> Result<InviteLink, DomainError> {
+    fn reset_user(&self, user: &ResourceName) -> Result<InviteLink, DomainError> {
         let req = CommandRequest::new(
             self.tctl.clone(),
-            vec!["users".to_owned(), "reset".to_owned(), user.to_owned()],
+            vec!["users".to_owned(), "reset".to_owned(), user.to_string()],
         );
         self.invite(user, &req)
     }
@@ -192,11 +193,9 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
         Ok(outcome.succeeded())
     }
 
-    fn select_cluster(&self, cluster: &str) -> Result<(), DomainError> {
-        // `cluster` becomes a *positional* argv element: validate it as a
-        // `ClusterName` (no empty / leading-`-` flag injection / whitespace /
-        // control chars), defence-in-depth against a value reshaping argv.
-        let cluster = ClusterName::try_from(cluster)?;
+    fn select_cluster(&self, cluster: &ClusterName) -> Result<(), DomainError> {
+        // `cluster` becomes a *positional* argv element; being a `ClusterName`
+        // it can't be empty or flag-like (no leading `-`).
         // `tsh login <cluster>` (POSITIONAL) selects a cluster under the current
         // proxy - the root or a trusted leaf - so the following `tctl` call, which
         // targets whatever cluster the profile has selected, hits the right one.
@@ -218,7 +217,7 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
         }
     }
 
-    fn generate_token(&self, token_type: &str) -> Result<GeneratedToken, DomainError> {
+    fn generate_token(&self, token_type: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         // SECURITY: stdout contains the secret token; it is parsed and returned
         // for one-time display, but never written to logs. On failure only the
         // (redacted) stderr is surfaced - never stdout.
@@ -525,7 +524,7 @@ impl AdminRepository for UnavailableAdmin {
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
         Err(DomainError::BinaryNotFound)
     }
-    fn generate_token(&self, _token_type: &str) -> Result<GeneratedToken, DomainError> {
+    fn generate_token(&self, _token_type: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         Err(DomainError::BinaryNotFound)
     }
 }
@@ -552,7 +551,7 @@ mod tests {
 
     fn select_with(stderr: &'static str) -> DomainError {
         TctlAdminRepository::new(FailingRunner { stderr }, "tctl".into(), "tsh".into())
-            .select_cluster("leaf.example")
+            .select_cluster(&ClusterName::try_from("leaf.example").unwrap())
             .unwrap_err()
     }
 
@@ -617,16 +616,6 @@ mod tests {
                 code: "TCTL_SPAWN_FAILED",
                 ..
             })
-        ));
-    }
-
-    #[test]
-    fn select_cluster_rejects_flag_like_names() {
-        let repo =
-            TctlAdminRepository::new(FailingRunner { stderr: "" }, "tctl".into(), "tsh".into());
-        assert!(matches!(
-            repo.select_cluster("--proxy=evil"),
-            Err(DomainError::InvalidValue { .. })
         ));
     }
 

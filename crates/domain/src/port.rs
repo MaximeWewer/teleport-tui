@@ -14,6 +14,7 @@ use crate::recording::SessionRecording;
 use crate::request::AccessRequest;
 use crate::resource::{App, Database, KubeCluster};
 use crate::session::ActiveSession;
+use crate::value::{ClusterName, ResourceName, RoleList, TokenTypes};
 
 /// Probes which top-level commands the installed `tsh` supports, so the UI can
 /// adapt to the actual binary (runtime detection, not compile-time `cfg`).
@@ -88,12 +89,12 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
     /// # Errors
     /// Returns [`DomainError`] on failure.
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError>;
-    /// Generate a join token of the given comma-separated type(s). The returned
+    /// Generate a join token of the given type(s). The returned
     /// token is a secret - display once, never log.
     ///
     /// # Errors
     /// Returns [`DomainError`] on failure.
-    fn generate_token(&self, token_type: &str) -> Result<GeneratedToken, DomainError>;
+    fn generate_token(&self, token_type: &TokenTypes) -> Result<GeneratedToken, DomainError>;
 
     /// List active provision (join) tokens (`tctl tokens ls`). For the `token`
     /// join method a token's name IS its secret, hence
@@ -115,12 +116,12 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
         Err(DomainError::BinaryNotFound)
     }
 
-    /// Create a user with the given comma-separated roles (`tctl users add`),
+    /// Create a user with the given roles (`tctl users add`),
     /// returning the one-time setup [`InviteLink`] (a secret - show once).
     ///
     /// # Errors
     /// Returns [`DomainError`] on failure.
-    fn add_user(&self, _user: &str, _roles: &str) -> Result<InviteLink, DomainError> {
+    fn add_user(&self, _user: &ResourceName, _roles: &RoleList) -> Result<InviteLink, DomainError> {
         Err(DomainError::BinaryNotFound)
     }
 
@@ -129,7 +130,7 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
     ///
     /// # Errors
     /// Returns [`DomainError`] on failure.
-    fn reset_user(&self, _user: &str) -> Result<InviteLink, DomainError> {
+    fn reset_user(&self, _user: &ResourceName) -> Result<InviteLink, DomainError> {
         Err(DomainError::BinaryNotFound)
     }
 
@@ -176,7 +177,7 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
     /// Returns [`DomainError::NotAuthenticated`] when no valid session exists for
     /// `cluster`, or another [`DomainError`] on spawn failure. Defaults to
     /// "unsupported" so adapters without profile control need not implement it.
-    fn select_cluster(&self, _cluster: &str) -> Result<(), DomainError> {
+    fn select_cluster(&self, _cluster: &ClusterName) -> Result<(), DomainError> {
         Err(DomainError::BinaryNotFound)
     }
 }

@@ -85,6 +85,20 @@ string_newtype!(ResourceName, "resource_name", 256, |s: &str| {
         .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '@'))
 });
 
+// Comma-separated role names (`tctl users add --roles=`, `tsh request create
+// --roles=`). The list is one argv value; `tctl`/`tsh` reject unknown roles.
+string_newtype!(RoleList, "roles", 256, |s: &str| {
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ','))
+});
+
+// Comma-separated join-token type(s) (`tctl tokens add --type=`), e.g.
+// `node,app`. Chars only (allowlist); `tctl` rejects unknown types itself.
+string_newtype!(TokenTypes, "token_type", 128, |s: &str| {
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | ','))
+});
+
 // Access-request id (UUID-like) passed to `tsh request show/review`.
 string_newtype!(RequestId, "request_id", 64, |s: &str| {
     s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
@@ -160,6 +174,16 @@ mod tests {
             assert!(Hostname::try_from(bad).is_err(), "should reject {bad:?}");
         }
         assert!(Hostname::try_from("node-01.root.example.com").is_ok());
+    }
+
+    #[test]
+    fn role_list_and_token_types_charsets() {
+        assert!(RoleList::try_from("dba,sre.admin").is_ok());
+        assert!(RoleList::try_from("-dba").is_err());
+        assert!(RoleList::try_from("dba sre").is_err());
+        assert!(TokenTypes::try_from("node,app").is_ok());
+        assert!(TokenTypes::try_from("--type=node").is_err());
+        assert!(TokenTypes::try_from("node.app").is_err());
     }
 
     #[test]

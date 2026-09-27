@@ -148,7 +148,7 @@ impl App {
 
     /// Log a failed root-profile restore and say which profile is stranded: every
     /// later `tsh`/`tctl` call reads the leaf until the user re-logs in.
-    fn report_restore_failed(&mut self, root: &str, error: &AppError) {
+    fn report_restore_failed(&mut self, root: &ClusterName, error: &AppError) {
         self.report(error);
         self.status = Some(format!(
             "[{}] could not switch the profile back to {root}: {}",
@@ -179,7 +179,7 @@ impl App {
         &mut self,
         seq: u64,
         tab: Tab,
-        cluster: &str,
+        cluster: &ClusterName,
         rows: Result<Vec<Vec<String>>, AppError>,
     ) {
         match rows {
@@ -188,7 +188,7 @@ impl App {
                 self.apply_agg_cluster(seq, tab, cluster, agg, true);
             }
             Err(e) => {
-                let agg = vec![err_row(cluster.to_owned(), &e)];
+                let agg = vec![err_row(cluster.clone(), &e)];
                 self.apply_agg_cluster(seq, tab, cluster, agg, false);
             }
         }
@@ -203,13 +203,12 @@ impl App {
         &mut self,
         seq: u64,
         tab: Tab,
-        cluster: &str,
+        cluster: &ClusterName,
         rows: Vec<AggRow>,
         cache: bool,
     ) {
         if cache {
-            self.agg_cache
-                .insert((tab, cluster.to_owned()), rows.clone());
+            self.agg_cache.insert((tab, cluster.clone()), rows.clone());
         }
         // Only touch the visible aggregate if this slice is for it.
         if seq != self.agg_seq || tab != self.tab {
@@ -462,7 +461,7 @@ impl App {
         let Some((cluster, root)) = self
             .topology
             .as_ref()
-            .map(|t| (t.selected().name.to_string(), t.root().name.to_string()))
+            .map(|t| (t.selected().name.clone(), t.root().name.clone()))
         else {
             self.dispatch_tab(job);
             return;
@@ -495,7 +494,7 @@ impl App {
         }
         let mut missing = Vec::new();
         for ctx in clusters {
-            if let Some(rows) = self.agg_cache.get(&(tab, ctx.name.to_string())) {
+            if let Some(rows) = self.agg_cache.get(&(tab, ctx.name.clone())) {
                 self.agg_rows.extend(rows.clone());
             } else {
                 missing.push(ctx.clone());
@@ -518,15 +517,15 @@ impl App {
     /// to root regardless of the picker selection; every other tab holds the
     /// **selected** cluster's rows. Recordings rebuilds its rows explicitly to keep
     /// each row's `sid` (needed to `tsh play` from the aggregate).
-    fn scoped_agg_seed(&self, tab: Tab) -> Option<(String, Vec<AggRow>)> {
+    fn scoped_agg_seed(&self, tab: Tab) -> Option<(ClusterName, Vec<AggRow>)> {
         if self.cache_key.get(&tab) != Some(&self.desired_key(tab)) {
             return None; // scoped data is stale / for another cluster
         }
         let topo = self.topology.as_ref()?;
         let cluster = if tab.is_admin() {
-            topo.root().name.to_string()
+            topo.root().name.clone()
         } else {
-            topo.selected().name.to_string()
+            topo.selected().name.clone()
         };
         let cells = |list: Vec<Vec<String>>| Some((cluster.clone(), agg_rows_of(&cluster, list)));
         match tab {
@@ -584,7 +583,7 @@ impl App {
     fn dispatch_aggregate_admin(&mut self) {
         let (Some(clusters), Some(root)) = (
             self.online_clusters(),
-            self.topology.as_ref().map(|t| t.root().name.to_string()),
+            self.topology.as_ref().map(|t| t.root().name.clone()),
         ) else {
             return;
         };

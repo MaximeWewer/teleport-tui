@@ -145,7 +145,7 @@ pub(crate) enum Mode {
     /// Editing the `tctl users add` form (username + roles).
     AddUser,
     /// Confirming a `tctl users reset` for the carried user.
-    ConfirmUserReset(String),
+    ConfirmUserReset(ResourceName),
     /// Showing the one-time account-setup URL (`tctl users add`/`reset`).
     ShowInvite,
     /// Showing the current user's MFA devices (`tsh mfa ls`); add/remove/navigate.
@@ -488,7 +488,7 @@ pub(crate) struct Repositories {
 /// resource's display cells.
 #[derive(Debug, Clone)]
 pub(crate) struct AggRow {
-    pub(crate) cluster: String,
+    pub(crate) cluster: ClusterName,
     pub(crate) cells: Vec<String>,
     /// True for a placeholder row standing in for a cluster the all-clusters
     /// admin fan-out could not reach because it has no active session. Pressing

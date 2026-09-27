@@ -1,7 +1,12 @@
 use super::*;
 use domain::cluster::{ClusterContext, ClusterKind, ClusterStatus, ClusterTopology};
 use domain::error::DomainError;
-use domain::value::{ClusterName, Hostname};
+use domain::value::{ClusterName, Hostname, ResourceName, RoleList, TokenTypes};
+
+/// A valid `ClusterName` for fixtures.
+fn cn(s: &str) -> ClusterName {
+    ClusterName::try_from(s).unwrap()
+}
 use ratatui::crossterm::event::KeyEvent;
 
 #[derive(Debug)]
@@ -139,13 +144,13 @@ impl AdminRepository for FakeAdmin {
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
         Ok(vec![])
     }
-    fn select_cluster(&self, _cluster: &str) -> Result<(), DomainError> {
+    fn select_cluster(&self, _cluster: &ClusterName) -> Result<(), DomainError> {
         Ok(())
     }
-    fn generate_token(&self, token_type: &str) -> Result<GeneratedToken, DomainError> {
+    fn generate_token(&self, token_type: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         Ok(GeneratedToken {
             token: SecretString::new("secret-token-value".to_owned()),
-            roles: vec![token_type.to_owned()],
+            roles: vec![token_type.to_string()],
             expires: "2026-06-29T00:00:00Z".to_owned(),
             ca_pins: vec!["sha256:abc".to_owned()],
         })
@@ -171,15 +176,15 @@ impl AdminRepository for FakeAdmin {
     fn remove_token(&self, _token: &str) -> Result<(), DomainError> {
         Ok(())
     }
-    fn add_user(&self, user: &str, _roles: &str) -> Result<InviteLink, DomainError> {
+    fn add_user(&self, user: &ResourceName, _roles: &RoleList) -> Result<InviteLink, DomainError> {
         Ok(InviteLink {
-            user: user.to_owned(),
+            user: user.to_string(),
             url: SecretString::new("https://proxy.example/web/invite/secret123".to_owned()),
         })
     }
-    fn reset_user(&self, user: &str) -> Result<InviteLink, DomainError> {
+    fn reset_user(&self, user: &ResourceName) -> Result<InviteLink, DomainError> {
         Ok(InviteLink {
-            user: user.to_owned(),
+            user: user.to_string(),
             url: SecretString::new("https://proxy.example/web/reset/secret456".to_owned()),
         })
     }
@@ -238,7 +243,7 @@ impl AdminRepository for NonAdmin {
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
         Err(DomainError::InvalidValue { field: "denied" })
     }
-    fn generate_token(&self, _token_type: &str) -> Result<GeneratedToken, DomainError> {
+    fn generate_token(&self, _token_type: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         Err(DomainError::InvalidValue { field: "denied" })
     }
 }
@@ -518,12 +523,12 @@ impl AdminRepository for CountingAdmin {
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
         Ok(vec![]) // also the default `can_admin` probe → admin allowed
     }
-    fn generate_token(&self, _t: &str) -> Result<GeneratedToken, DomainError> {
+    fn generate_token(&self, _t: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         Err(DomainError::BinaryNotFound)
     }
     // A working profile switch lets the all-clusters admin fan-out reach
     // every cluster (otherwise each would read as login-required).
-    fn select_cluster(&self, _proxy: &str) -> Result<(), DomainError> {
+    fn select_cluster(&self, _proxy: &ClusterName) -> Result<(), DomainError> {
         Ok(())
     }
 }
@@ -543,11 +548,11 @@ impl AdminRepository for RootOnlyAdmin {
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
         Ok(vec![])
     }
-    fn generate_token(&self, _t: &str) -> Result<GeneratedToken, DomainError> {
+    fn generate_token(&self, _t: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         Err(DomainError::BinaryNotFound)
     }
-    fn select_cluster(&self, proxy: &str) -> Result<(), DomainError> {
-        if proxy == "root.example" {
+    fn select_cluster(&self, proxy: &ClusterName) -> Result<(), DomainError> {
+        if proxy.as_str() == "root.example" {
             Ok(())
         } else {
             Err(DomainError::NotAuthenticated)
@@ -570,11 +575,11 @@ impl AdminRepository for RecordingAdmin {
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
         Ok(vec![])
     }
-    fn generate_token(&self, _t: &str) -> Result<GeneratedToken, DomainError> {
+    fn generate_token(&self, _t: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         Err(DomainError::BinaryNotFound)
     }
-    fn select_cluster(&self, proxy: &str) -> Result<(), DomainError> {
-        self.0.lock().unwrap().push(proxy.to_owned());
+    fn select_cluster(&self, proxy: &ClusterName) -> Result<(), DomainError> {
+        self.0.lock().unwrap().push(proxy.to_string());
         Ok(())
     }
 }
@@ -614,11 +619,13 @@ fn superseded_scoped_admin_job_skips_its_work() {
     let repos = test_repos(Box::new(RecordingAdmin(calls.clone())));
     let latest = AtomicU64::new(7);
 
-    let stale = dispatch::run_scoped_if_latest(&repos, &latest, 5, Job::Users, "leaf", "root");
+    let stale =
+        dispatch::run_scoped_if_latest(&repos, &latest, 5, Job::Users, &cn("leaf"), &cn("root"));
     assert!(stale.is_empty());
     assert!(calls.lock().unwrap().is_empty());
 
-    let current = dispatch::run_scoped_if_latest(&repos, &latest, 7, Job::Users, "leaf", "root");
+    let current =
+        dispatch::run_scoped_if_latest(&repos, &latest, 7, Job::Users, &cn("leaf"), &cn("root"));
     assert!(matches!(current.as_slice(), [JobResult::Users(Ok(u))] if u.len() == 1));
     assert_eq!(
         *calls.lock().unwrap(),
@@ -645,11 +652,11 @@ impl AdminRepository for FailingSelectAdmin {
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
         Ok(vec![])
     }
-    fn generate_token(&self, _t: &str) -> Result<GeneratedToken, DomainError> {
+    fn generate_token(&self, _t: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         Err(DomainError::BinaryNotFound)
     }
-    fn select_cluster(&self, proxy: &str) -> Result<(), DomainError> {
-        if proxy == self.fails {
+    fn select_cluster(&self, proxy: &ClusterName) -> Result<(), DomainError> {
+        if proxy.as_str() == self.fails {
             Err(DomainError::Backend {
                 code: "TSH_EXEC_FAILED",
                 detail: "connection refused".to_owned(),
@@ -731,8 +738,16 @@ fn admin_tab_aggregates_across_clusters() {
     assert_eq!(counter.load(Ordering::SeqCst), 1);
     assert_eq!(app.agg_rows.len(), 2);
     assert!(app.agg_rows.iter().all(|r| !r.login_required));
-    assert!(app.agg_rows.iter().any(|r| r.cluster == "root.example"));
-    assert!(app.agg_rows.iter().any(|r| r.cluster == "leaf.example"));
+    assert!(
+        app.agg_rows
+            .iter()
+            .any(|r| r.cluster.as_str() == "root.example")
+    );
+    assert!(
+        app.agg_rows
+            .iter()
+            .any(|r| r.cluster.as_str() == "leaf.example")
+    );
     // Leave and return - the fan-out is cached per tab (no refetch).
     app.on_key(press('1')); // SSH (aggregated)
     app.on_key(press('5')); // Users again
@@ -758,13 +773,13 @@ fn admin_aggregate_marks_unauthenticated_clusters_login_required() {
     let root = app
         .agg_rows
         .iter()
-        .find(|r| r.cluster == "root.example")
+        .find(|r| r.cluster.as_str() == "root.example")
         .unwrap();
     assert!(!root.login_required);
     let leaf = app
         .agg_rows
         .iter()
-        .find(|r| r.cluster == "leaf.example")
+        .find(|r| r.cluster.as_str() == "leaf.example")
         .unwrap();
     assert!(leaf.login_required);
     // Selecting the placeholder and pressing `L` opens the login FORM
@@ -783,7 +798,7 @@ fn admin_aggregate_marks_unauthenticated_clusters_login_required() {
         }
         _ => panic!("expected a login Run on submit"),
     }
-    assert_eq!(app.pending_root_restore.as_deref(), Some("root.example"));
+    assert_eq!(app.pending_root_restore, Some(cn("root.example")));
 }
 
 #[test]
@@ -817,9 +832,9 @@ fn aggregate_reuses_cached_clusters_and_fetches_only_missing() {
     let mut app = test_app_with_admin(Box::new(CountingAdmin(counter.clone())));
     // Pretend one cluster's Users slice was cached by an earlier partial fan-out.
     app.agg_cache.insert(
-        (Tab::Users, "root.example".to_owned()),
+        (Tab::Users, cn("root.example")),
         vec![AggRow {
-            cluster: "root.example".to_owned(),
+            cluster: cn("root.example"),
             cells: vec!["alice".to_owned()],
             login_required: false,
             error: false,
@@ -837,8 +852,16 @@ fn aggregate_reuses_cached_clusters_and_fetches_only_missing() {
         1,
         "only the missing cluster fetched"
     );
-    assert!(app.agg_rows.iter().any(|r| r.cluster == "root.example")); // from cache
-    assert!(app.agg_rows.iter().any(|r| r.cluster == "leaf.example")); // freshly fetched
+    assert!(
+        app.agg_rows
+            .iter()
+            .any(|r| r.cluster.as_str() == "root.example")
+    ); // from cache
+    assert!(
+        app.agg_rows
+            .iter()
+            .any(|r| r.cluster.as_str() == "leaf.example")
+    ); // freshly fetched
 }
 
 #[test]
@@ -848,7 +871,7 @@ fn agg_slice_caches_per_cluster_even_when_off_tab() {
     let mut app = test_app();
     assert_eq!(app.tab, Tab::Ssh); // not on Roles
     let rows = vec![AggRow {
-        cluster: "leaf.example".to_owned(),
+        cluster: cn("leaf.example"),
         cells: vec!["admin".to_owned()],
         login_required: false,
         error: false,
@@ -858,13 +881,13 @@ fn agg_slice_caches_per_cluster_even_when_off_tab() {
         app.agg_seq,
         JobResult::AggregateAdmin {
             tab: Tab::Roles,
-            cluster: "leaf.example".to_owned(),
+            cluster: cn("leaf.example"),
             rows,
         },
     );
     assert!(
         app.agg_cache
-            .contains_key(&(Tab::Roles, "leaf.example".to_owned())),
+            .contains_key(&(Tab::Roles, cn("leaf.example"))),
         "the slice is cached per (tab, cluster) regardless of the current view"
     );
 }
@@ -878,7 +901,7 @@ fn aggregate_error_renders_an_error_row_without_caching_it() {
         app.agg_seq,
         JobResult::Aggregate {
             tab: Tab::Ssh,
-            cluster: "leaf.example".to_owned(),
+            cluster: cn("leaf.example"),
             rows: Err(DomainError::ClusterOffline {
                 cluster: "leaf.example".to_owned(),
             }
@@ -887,13 +910,10 @@ fn aggregate_error_renders_an_error_row_without_caching_it() {
     );
     // Shown like the admin path's error row, not silently dropped...
     assert_eq!(app.agg_rows.len(), 1);
-    assert_eq!(app.agg_rows[0].cluster, "leaf.example");
+    assert_eq!(app.agg_rows[0].cluster.as_str(), "leaf.example");
     assert!(app.agg_rows[0].cells[0].contains("offline"));
     // ...but not cached, so the next visit retries the cluster.
-    assert!(
-        !app.agg_cache
-            .contains_key(&(Tab::Ssh, "leaf.example".to_owned()))
-    );
+    assert!(!app.agg_cache.contains_key(&(Tab::Ssh, cn("leaf.example"))));
 }
 
 /// An aggregate view holding only `cluster`'s listing-error row on `tab`, with
@@ -907,7 +927,7 @@ fn app_with_error_row(tab: Tab) -> App {
         app.agg_seq,
         JobResult::Aggregate {
             tab,
-            cluster: "leaf.example".to_owned(),
+            cluster: cn("leaf.example"),
             rows: Err(DomainError::ClusterOffline {
                 cluster: "leaf.example".to_owned(),
             }
@@ -976,7 +996,11 @@ fn recordings_aggregate_across_clusters_and_play() {
             .iter()
             .all(|r| r.sid.as_deref() == Some("sess-0001"))
     );
-    assert!(app.agg_rows.iter().any(|r| r.cluster == "leaf.example"));
+    assert!(
+        app.agg_rows
+            .iter()
+            .any(|r| r.cluster.as_str() == "leaf.example")
+    );
     // Enter plays the highlighted recording via its aggregate-row sid.
     app.table.select(Some(0));
     match app.on_key(KeyEvent::from(KeyCode::Enter)) {
@@ -995,8 +1019,16 @@ fn all_clusters_aggregate_merges_and_connects_directly() {
     assert!(app.aggregate);
     // 3 nodes × 2 online clusters (root + leaf) = 6 aggregate rows.
     assert_eq!(app.agg_rows.len(), 6);
-    assert!(app.agg_rows.iter().any(|r| r.cluster == "root.example"));
-    assert!(app.agg_rows.iter().any(|r| r.cluster == "leaf.example"));
+    assert!(
+        app.agg_rows
+            .iter()
+            .any(|r| r.cluster.as_str() == "root.example")
+    );
+    assert!(
+        app.agg_rows
+            .iter()
+            .any(|r| r.cluster.as_str() == "leaf.example")
+    );
     // Enter connects DIRECTLY (no drill-down): row 0 is root.example/web-01.
     app.table.select(Some(0));
     app.on_key(KeyEvent::from(KeyCode::Enter));
@@ -1102,8 +1134,16 @@ fn entering_all_clusters_reuses_active_cluster_data() {
     assert!(app.aggregate);
     // Both clusters render (root reused from scoped cache + leaf fetched)...
     assert_eq!(app.agg_rows.len(), 2);
-    assert!(app.agg_rows.iter().any(|r| r.cluster == "root.example"));
-    assert!(app.agg_rows.iter().any(|r| r.cluster == "leaf.example"));
+    assert!(
+        app.agg_rows
+            .iter()
+            .any(|r| r.cluster.as_str() == "root.example")
+    );
+    assert!(
+        app.agg_rows
+            .iter()
+            .any(|r| r.cluster.as_str() == "leaf.example")
+    );
     // ...but only leaf triggered a fetch - root's rows came from memory.
     assert_eq!(counter.load(Ordering::SeqCst), 1);
 }
@@ -1846,7 +1886,7 @@ fn reset_user_confirm_shows_reset_url() {
     let mut app = test_app();
     app.on_key(press('5')); // Users tab (alice selected)
     app.on_key(press('R'));
-    assert!(matches!(app.mode, Mode::ConfirmUserReset(ref u) if u == "alice"));
+    assert!(matches!(app.mode, Mode::ConfirmUserReset(ref u) if u.as_str() == "alice"));
     app.on_key(press('y'));
     assert_eq!(app.mode, Mode::ShowInvite);
     assert!(
@@ -2018,7 +2058,7 @@ impl AdminRepository for BrokenProbeAdmin {
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
         Ok(vec![])
     }
-    fn generate_token(&self, _t: &str) -> Result<GeneratedToken, DomainError> {
+    fn generate_token(&self, _t: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         Err(DomainError::BinaryNotFound)
     }
     fn can_admin(&self) -> Result<bool, DomainError> {

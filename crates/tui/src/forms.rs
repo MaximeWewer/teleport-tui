@@ -306,26 +306,6 @@ impl KubeExecForm {
     }
 }
 
-/// Validate a token-type string before it becomes a `tctl` argument. Chars
-/// only (allowlist); `tctl` rejects unknown types itself.
-pub(crate) fn valid_token_type(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 128
-        && !s.starts_with('-')
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | ','))
-}
-
-/// Validate a comma-separated roles string before it becomes a `tsh` argument.
-pub(crate) fn valid_roles(roles: &str) -> bool {
-    !roles.is_empty()
-        && roles.len() <= 256
-        && !roles.starts_with('-')
-        && roles
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | ','))
-}
-
 /// Validate a connection user/login (from the profile or typed) before it
 /// becomes a CLI argument: no control/whitespace and no leading `-` (which
 /// could be parsed as a flag). Kube users may contain `:./@_-`.

@@ -52,7 +52,7 @@ impl App {
         if let Some(proxy) = self.pending_login_cluster() {
             // Remember the root to restore after this leaf login (consumed in
             // submit_login); the aggregate re-fans once the leaf is reachable.
-            self.relogin_root = self.topology.as_ref().map(|t| t.root().name.to_string());
+            self.relogin_root = self.topology.as_ref().map(|t| t.root().name.clone());
             self.open_login_form_proxy(proxy);
         } else {
             self.relogin_root = None;
@@ -69,7 +69,7 @@ impl App {
         }
         let idx = self.selected_index()?;
         let row = self.agg_rows.get(idx)?;
-        row.login_required.then(|| row.cluster.clone())
+        row.login_required.then(|| row.cluster.to_string())
     }
 
     /// Open the Settings screen, pre-filled from the live persisted defaults.
@@ -167,7 +167,8 @@ impl App {
         if let Some(root) = self.relogin_root.take() {
             self.pending_root_restore = Some(root);
             let proxy = f.proxy.clone();
-            self.agg_cache.retain(|(_, cluster), _| cluster != &proxy);
+            self.agg_cache
+                .retain(|(_, cluster), _| cluster.as_str() != proxy);
         }
         let auth = f.auth_str();
         let mfa = f.mfa_str();
@@ -470,7 +471,7 @@ impl App {
             let Some(r) = self.agg_rows.get(idx) else {
                 return Outcome::Continue;
             };
-            let mut rows = vec![("CLUSTER".to_owned(), vec![r.cluster.clone()])];
+            let mut rows = vec![("CLUSTER".to_owned(), vec![r.cluster.to_string()])];
             rows.extend(
                 tab_columns(self.tab)
                     .iter()
@@ -730,14 +731,10 @@ impl App {
         }
         let r = self.agg_rows.get(idx)?;
         let name = r.cells.first()?;
-        if r.cluster.is_empty()
-            || name.is_empty()
-            || r.cluster.starts_with('-')
-            || name.starts_with('-')
-        {
+        if name.is_empty() || name.starts_with('-') {
             return None;
         }
-        Some((r.cluster.clone(), name.clone()))
+        Some((r.cluster.to_string(), name.clone()))
     }
 
     /// Whether the aggregate row at `idx` is a real resource. A placeholder (a
@@ -859,13 +856,13 @@ impl App {
     /// popup - it is **never** logged. tctl availability is handled by the admin
     /// adapter (returns an error if absent).
     pub(super) fn generate_token(&mut self) {
-        let token_type = self.input.trim().to_owned();
-        if !valid_token_type(&token_type) {
-            self.report(&DomainError::InvalidValue {
-                field: "token_type",
-            });
-            return;
-        }
+        let token_type = match TokenTypes::try_from(self.input.trim()) {
+            Ok(t) => t,
+            Err(e) => {
+                self.report(&e);
+                return;
+            }
+        };
         self.mode = Mode::Normal;
         self.input.clear();
         self.status = Some(format!("generating {token_type} token…"));
@@ -927,11 +924,13 @@ impl App {
 
     /// Create an access request for the typed comma-separated roles.
     pub(super) fn create_request(&mut self) -> Outcome {
-        let roles = self.input.trim().to_owned();
-        if !valid_roles(&roles) {
-            self.report(&DomainError::InvalidValue { field: "roles" });
-            return Outcome::Continue;
-        }
+        let roles = match RoleList::try_from(self.input.trim()) {
+            Ok(r) => r,
+            Err(e) => {
+                self.report(&e);
+                return Outcome::Continue;
+            }
+        };
         let Some(cluster) = self.cluster_arg() else {
             return Outcome::Continue;
         };
@@ -939,7 +938,7 @@ impl App {
         self.input.clear();
         Outcome::Run {
             label: format!("Creating access request for roles {roles}…"),
-            args: cmd::request_create(&cluster, &roles),
+            args: cmd::request_create(&cluster, roles.as_str()),
         }
     }
 
