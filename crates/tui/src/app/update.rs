@@ -180,13 +180,10 @@ impl App {
         seq: u64,
         tab: Tab,
         cluster: &ClusterName,
-        rows: Result<Vec<Vec<String>>, DomainError>,
+        rows: Result<Vec<AggRow>, DomainError>,
     ) {
         match rows {
-            Ok(cells) => {
-                let agg = agg_rows_of(cluster, cells);
-                self.apply_agg_cluster(seq, tab, cluster, agg, true);
-            }
+            Ok(agg) => self.apply_agg_cluster(seq, tab, cluster, agg, true),
             Err(e) => {
                 let agg = vec![err_row(cluster.clone(), &e)];
                 self.apply_agg_cluster(seq, tab, cluster, agg, false);
@@ -242,19 +239,7 @@ impl App {
     /// and the load outcome (row count or error). No UI side effects.
     fn store_tab_result(&mut self, result: JobResult) -> (Tab, Result<usize, DomainError>) {
         match result {
-            JobResult::Nodes(r) => (Tab::Ssh, r.map(|v| set_vec(&mut self.nodes, v))),
-            JobResult::Kube(r) => (Tab::Kube, r.map(|v| set_vec(&mut self.kube, v))),
-            JobResult::Db(r) => (Tab::Db, r.map(|v| set_vec(&mut self.dbs, v))),
-            JobResult::Apps(r) => (Tab::Apps, r.map(|v| set_vec(&mut self.apps, v))),
-            JobResult::Requests(r) => (Tab::Requests, r.map(|v| set_vec(&mut self.requests, v))),
-            JobResult::Recordings(r) => {
-                (Tab::Recordings, r.map(|v| set_vec(&mut self.recordings, v)))
-            }
-            JobResult::Users(r) => (Tab::Users, r.map(|v| set_vec(&mut self.users, v))),
-            JobResult::Roles(r) => (Tab::Roles, r.map(|v| set_vec(&mut self.roles, v))),
-            JobResult::Bots(r) => (Tab::Bots, r.map(|v| set_vec(&mut self.bots, v))),
-            JobResult::Instances(r) => (Tab::Inventory, r.map(|v| set_vec(&mut self.instances, v))),
-            JobResult::Tokens(r) => (Tab::Tokens, r.map(|v| set_vec(&mut self.tokens, v))),
+            JobResult::List { tab, result } => (tab, result.map(|l| self.store_listing(l))),
             JobResult::Clusters(_)
             | JobResult::Status(_)
             | JobResult::Token(_)
@@ -269,6 +254,23 @@ impl App {
             | JobResult::Aggregate { .. }
             | JobResult::RestoreFailed { .. }
             | JobResult::AggregateAdmin { .. } => (self.tab, Ok(0)),
+        }
+    }
+
+    /// Store a typed listing into its tab's vec and return the row count.
+    fn store_listing(&mut self, listing: Listing) -> usize {
+        match listing {
+            Listing::Nodes(v) => set_vec(&mut self.nodes, v),
+            Listing::Kube(v) => set_vec(&mut self.kube, v),
+            Listing::Db(v) => set_vec(&mut self.dbs, v),
+            Listing::Apps(v) => set_vec(&mut self.apps, v),
+            Listing::Requests(v) => set_vec(&mut self.requests, v),
+            Listing::Recordings(v) => set_vec(&mut self.recordings, v),
+            Listing::Users(v) => set_vec(&mut self.users, v),
+            Listing::Roles(v) => set_vec(&mut self.roles, v),
+            Listing::Tokens(v) => set_vec(&mut self.tokens, v),
+            Listing::Bots(v) => set_vec(&mut self.bots, v),
+            Listing::Instances(v) => set_vec(&mut self.instances, v),
         }
     }
 
@@ -365,20 +367,7 @@ impl App {
             if self.cache_key.get(&tab) == Some(&self.desired_key(tab)) {
                 continue; // already cached for this context
             }
-            let job = match tab {
-                Tab::Ssh => ctx.clone().map(Job::Nodes),
-                Tab::Kube => ctx.clone().map(Job::Kube),
-                Tab::Db => ctx.clone().map(Job::Db),
-                Tab::Apps => ctx.clone().map(Job::Apps),
-                Tab::Requests => ctx.clone().map(Job::Requests),
-                Tab::Recordings => ctx.clone().map(Job::Recordings),
-                Tab::Users => Some(Job::Users),
-                Tab::Roles => Some(Job::Roles),
-                Tab::Tokens => Some(Job::Tokens),
-                Tab::Bots => Some(Job::Bots),
-                Tab::Inventory => Some(Job::Instances),
-            };
-            if let Some(job) = job {
+            if let Some(job) = Job::list(tab, ctx.as_ref()) {
                 self.send(seq, job, Lane::Prefetch);
             }
         }
@@ -422,13 +411,9 @@ impl App {
             return;
         }
         if self.tab.is_admin() {
-            let job = match self.tab {
-                Tab::Users => Job::Users,
-                Tab::Roles => Job::Roles,
-                Tab::Tokens => Job::Tokens,
-                Tab::Bots => Job::Bots,
-                Tab::Inventory => Job::Instances,
-                _ => return, // non-admin tab can't reach the admin branch
+            let job = Job::List {
+                tab: self.tab,
+                ctx: None,
             };
             // Admin listings go through `tctl`, which targets the profile's current
             // cluster (not the UI's -c). Re-key the selected cluster first so a leaf
@@ -441,16 +426,10 @@ impl App {
         let Some(ctx) = self.topology.as_ref().map(|t| t.selected().clone()) else {
             return;
         };
-        let job = match self.tab {
-            Tab::Ssh => Job::Nodes(ctx),
-            Tab::Kube => Job::Kube(ctx),
-            Tab::Db => Job::Db(ctx),
-            Tab::Apps => Job::Apps(ctx),
-            Tab::Requests => Job::Requests(ctx),
-            Tab::Recordings => Job::Recordings(ctx),
-            Tab::Users | Tab::Roles | Tab::Tokens | Tab::Bots | Tab::Inventory => return,
-        };
-        self.dispatch_tab(job);
+        self.dispatch_tab(Job::List {
+            tab: self.tab,
+            ctx: Some(ctx),
+        });
     }
 
     /// Dispatch a single-cluster admin listing that must run against the selected

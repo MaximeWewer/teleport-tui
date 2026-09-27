@@ -18,17 +18,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub(super) enum Job {
     Clusters,
     Status,
-    Nodes(ClusterContext),
-    Kube(ClusterContext),
-    Db(ClusterContext),
-    Apps(ClusterContext),
-    Requests(ClusterContext),
-    Recordings(ClusterContext),
-    Users,
-    Roles,
-    Tokens,
-    Bots,
-    Instances,
+    /// A tab's listing (see [`list_tab`]): `ctx` is the cluster for a
+    /// cluster-scoped tab, `None` for an admin tab (current profile).
+    List {
+        tab: Tab,
+        ctx: Option<ClusterContext>,
+    },
     /// List the current user's MFA devices (`tsh mfa ls`).
     Mfa,
     /// List active sessions to join (`tsh sessions ls -c <cluster>`).
@@ -57,17 +52,10 @@ pub(super) enum Job {
 pub(super) enum JobResult {
     Clusters(Result<ClusterTopology, DomainError>),
     Status(Result<Option<Profile>, DomainError>),
-    Nodes(Result<Vec<SshNode>, DomainError>),
-    Kube(Result<Vec<KubeCluster>, DomainError>),
-    Db(Result<Vec<Database>, DomainError>),
-    Apps(Result<Vec<AppResource>, DomainError>),
-    Requests(Result<Vec<AccessRequest>, DomainError>),
-    Recordings(Result<Vec<SessionRecording>, DomainError>),
-    Users(Result<Vec<AdminUser>, DomainError>),
-    Roles(Result<Vec<AdminRole>, DomainError>),
-    Tokens(Result<Vec<ProvisionToken>, DomainError>),
-    Bots(Result<Vec<Bot>, DomainError>),
-    Instances(Result<Vec<Instance>, DomainError>),
+    List {
+        tab: Tab,
+        result: Result<Listing, DomainError>,
+    },
     Mfa(Result<Vec<MfaDevice>, DomainError>),
     Sessions(Result<Vec<ActiveSession>, DomainError>),
     TokenRemoved(Result<(), DomainError>),
@@ -82,7 +70,7 @@ pub(super) enum JobResult {
     Aggregate {
         tab: Tab,
         cluster: ClusterName,
-        rows: Result<Vec<Vec<String>>, DomainError>,
+        rows: Result<Vec<AggRow>, DomainError>,
     },
     /// One cluster's slice of a serial admin/recordings fan-out (its rows, or a
     /// login-required placeholder), already tagged. Streamed one per cluster;
@@ -101,27 +89,116 @@ pub(super) enum JobResult {
     },
 }
 
+impl Job {
+    /// The listing job for `tab`: admin tabs need no cluster, cluster-scoped
+    /// tabs need `ctx` (`None` without one, e.g. before the topology loads).
+    pub(super) fn list(tab: Tab, ctx: Option<&ClusterContext>) -> Option<Self> {
+        if tab.is_admin() {
+            return Some(Self::List { tab, ctx: None });
+        }
+        ctx.map(|ctx| Self::List {
+            tab,
+            ctx: Some(ctx.clone()),
+        })
+    }
+}
+
+/// One tab's typed listing, as returned by its use case (see [`list_tab`]).
+pub(super) enum Listing {
+    Nodes(Vec<SshNode>),
+    Kube(Vec<KubeCluster>),
+    Db(Vec<Database>),
+    Apps(Vec<AppResource>),
+    Requests(Vec<AccessRequest>),
+    Recordings(Vec<SessionRecording>),
+    Users(Vec<AdminUser>),
+    Roles(Vec<AdminRole>),
+    Tokens(Vec<ProvisionToken>),
+    Bots(Vec<Bot>),
+    Instances(Vec<Instance>),
+}
+
+impl Listing {
+    /// Each item's display row, tagged with `cluster` for the aggregate view.
+    /// Recordings keep their `sid` (not a displayed column) so the aggregate
+    /// can still `tsh play` them.
+    pub(super) fn into_agg_rows(self, cluster: &ClusterName) -> Vec<AggRow> {
+        fn tag<T: Resource>(cluster: &ClusterName, items: &[T]) -> Vec<AggRow> {
+            agg_rows_of(cluster, items.iter().map(Resource::row).collect())
+        }
+        match self {
+            Self::Nodes(v) => tag(cluster, &v),
+            Self::Kube(v) => tag(cluster, &v),
+            Self::Db(v) => tag(cluster, &v),
+            Self::Apps(v) => tag(cluster, &v),
+            Self::Requests(v) => tag(cluster, &v),
+            Self::Users(v) => tag(cluster, &v),
+            Self::Roles(v) => tag(cluster, &v),
+            Self::Tokens(v) => tag(cluster, &v),
+            Self::Bots(v) => tag(cluster, &v),
+            Self::Instances(v) => tag(cluster, &v),
+            Self::Recordings(v) => v
+                .into_iter()
+                .map(|r| AggRow {
+                    cluster: cluster.clone(),
+                    cells: r.row(),
+                    login_required: false,
+                    error: false,
+                    sid: Some(r.sid),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The one Tab -> use-case table: run `tab`'s listing. Cluster-scoped tabs list
+/// `ctx` (`tsh -c`); admin tabs (`tctl`) target the current profile and ignore
+/// it. A cluster-scoped tab without a `ctx` is a caller bug (see [`Job::list`])
+/// and reported as an invalid value rather than listing some other cluster.
+fn list_tab(
+    repos: &Repositories,
+    tab: Tab,
+    ctx: Option<&ClusterContext>,
+) -> Result<Listing, DomainError> {
+    let scoped = || ctx.ok_or(DomainError::InvalidValue { field: "cluster" });
+    let admin = repos.admin.as_ref();
+    match tab {
+        Tab::Ssh => ListNodes::new(repos.nodes.as_ref())
+            .execute(scoped()?)
+            .map(Listing::Nodes),
+        Tab::Kube => ListKube::new(repos.kube.as_ref())
+            .execute(scoped()?)
+            .map(Listing::Kube),
+        Tab::Db => ListDatabases::new(repos.databases.as_ref())
+            .execute(scoped()?)
+            .map(Listing::Db),
+        Tab::Apps => ListApps::new(repos.apps.as_ref())
+            .execute(scoped()?)
+            .map(Listing::Apps),
+        Tab::Requests => ListRequests::new(repos.requests.as_ref())
+            .execute(scoped()?)
+            .map(Listing::Requests),
+        Tab::Recordings => ListRecordings::new(repos.recordings.as_ref())
+            .execute(scoped()?)
+            .map(Listing::Recordings),
+        Tab::Users => ListUsers::new(admin).execute().map(Listing::Users),
+        Tab::Roles => ListRoles::new(admin).execute().map(Listing::Roles),
+        Tab::Tokens => ListTokens::new(admin).execute().map(Listing::Tokens),
+        Tab::Bots => ListBots::new(admin).execute().map(Listing::Bots),
+        Tab::Inventory => ListInstances::new(admin).execute().map(Listing::Instances),
+    }
+}
+
 /// Run a job against the repositories. Pure dispatch - safe to call from a
 /// worker thread (repos are `Send + Sync`).
 fn run_job(repos: &Repositories, job: Job) -> JobResult {
     match job {
         Job::Clusters => JobResult::Clusters(ListClusters::new(repos.clusters.as_ref()).execute()),
         Job::Status => JobResult::Status(GetStatus::new(repos.auth.as_ref()).execute()),
-        Job::Nodes(ctx) => JobResult::Nodes(ListNodes::new(repos.nodes.as_ref()).execute(&ctx)),
-        Job::Kube(ctx) => JobResult::Kube(ListKube::new(repos.kube.as_ref()).execute(&ctx)),
-        Job::Db(ctx) => JobResult::Db(ListDatabases::new(repos.databases.as_ref()).execute(&ctx)),
-        Job::Apps(ctx) => JobResult::Apps(ListApps::new(repos.apps.as_ref()).execute(&ctx)),
-        Job::Requests(ctx) => {
-            JobResult::Requests(ListRequests::new(repos.requests.as_ref()).execute(&ctx))
-        }
-        Job::Recordings(ctx) => {
-            JobResult::Recordings(ListRecordings::new(repos.recordings.as_ref()).execute(&ctx))
-        }
-        Job::Users => JobResult::Users(ListUsers::new(repos.admin.as_ref()).execute()),
-        Job::Roles => JobResult::Roles(ListRoles::new(repos.admin.as_ref()).execute()),
-        Job::Tokens => JobResult::Tokens(ListTokens::new(repos.admin.as_ref()).execute()),
-        Job::Bots => JobResult::Bots(ListBots::new(repos.admin.as_ref()).execute()),
-        Job::Instances => JobResult::Instances(ListInstances::new(repos.admin.as_ref()).execute()),
+        Job::List { tab, ctx } => JobResult::List {
+            tab,
+            result: list_tab(repos, tab, ctx.as_ref()),
+        },
         Job::Mfa => JobResult::Mfa(ListMfaDevices::new(repos.auth.as_ref()).execute()),
         Job::Sessions(ctx) => {
             JobResult::Sessions(ListSessions::new(repos.sessions.as_ref()).execute(&ctx))
@@ -142,14 +219,11 @@ fn run_job(repos: &Repositories, job: Job) -> JobResult {
             Ok(ok) => JobResult::AdminAllowed(ok),
             Err(e) => JobResult::AdminProbeFailed(e),
         },
-        Job::Aggregate { tab, ctx } => {
-            let rows = aggregate_rows(repos, tab, &ctx);
-            JobResult::Aggregate {
-                tab,
-                cluster: ctx.name,
-                rows,
-            }
-        }
+        Job::Aggregate { tab, ctx } => JobResult::Aggregate {
+            tab,
+            rows: list_tab(repos, tab, Some(&ctx)).map(|l| l.into_agg_rows(&ctx.name)),
+            cluster: ctx.name,
+        },
     }
 }
 
@@ -160,17 +234,10 @@ fn failed_job(job: Job, e: DomainError) -> JobResult {
     match job {
         Job::Clusters => JobResult::Clusters(Err(e)),
         Job::Status => JobResult::Status(Err(e)),
-        Job::Nodes(_) => JobResult::Nodes(Err(e)),
-        Job::Kube(_) => JobResult::Kube(Err(e)),
-        Job::Db(_) => JobResult::Db(Err(e)),
-        Job::Apps(_) => JobResult::Apps(Err(e)),
-        Job::Requests(_) => JobResult::Requests(Err(e)),
-        Job::Recordings(_) => JobResult::Recordings(Err(e)),
-        Job::Users => JobResult::Users(Err(e)),
-        Job::Roles => JobResult::Roles(Err(e)),
-        Job::Tokens => JobResult::Tokens(Err(e)),
-        Job::Bots => JobResult::Bots(Err(e)),
-        Job::Instances => JobResult::Instances(Err(e)),
+        Job::List { tab, .. } => JobResult::List {
+            tab,
+            result: Err(e),
+        },
         Job::Mfa => JobResult::Mfa(Err(e)),
         Job::Sessions(_) => JobResult::Sessions(Err(e)),
         Job::RemoveToken(_) => JobResult::TokenRemoved(Err(e)),
@@ -246,37 +313,9 @@ fn restore_root(repos: &Repositories, root: &ClusterName) -> Option<JobResult> {
 /// placeholder; any other switch failure yields an error row.
 fn admin_cluster_rows(repos: &Repositories, tab: Tab, ctx: &ClusterContext) -> Vec<AggRow> {
     let cluster = ctx.name.clone();
-    // Recordings carries a per-row sid (for `tsh play`); the admin tabs don't.
-    if tab == Tab::Recordings {
-        return match select_cluster(repos, &cluster) {
-            Ok(()) => match ListRecordings::new(repos.recordings.as_ref()).execute(ctx) {
-                Ok(recs) => recs
-                    .into_iter()
-                    .map(|r| AggRow {
-                        cluster: cluster.clone(),
-                        cells: r.row(),
-                        login_required: false,
-                        error: false,
-                        sid: Some(r.sid),
-                    })
-                    .collect(),
-                Err(e) => vec![err_row(cluster, &e)],
-            },
-            Err(e) => vec![select_failed_row(cluster, e)],
-        };
-    }
     match select_cluster(repos, &cluster) {
-        Ok(()) => match admin_rows(repos, tab) {
-            Ok(rows) => rows
-                .into_iter()
-                .map(|cells| AggRow {
-                    cluster: cluster.clone(),
-                    cells,
-                    login_required: false,
-                    error: false,
-                    sid: None,
-                })
-                .collect(),
+        Ok(()) => match list_tab(repos, tab, Some(ctx)) {
+            Ok(listing) => listing.into_agg_rows(&cluster),
             Err(e) => vec![err_row(cluster, &e)],
         },
         Err(e) => vec![select_failed_row(cluster, e)],
@@ -325,48 +364,6 @@ fn login_required_row(cluster: ClusterName) -> AggRow {
         login_required: true,
         error: false,
         sid: None,
-    }
-}
-
-/// Display rows for an admin `tab` against the *current* profile (Recordings is
-/// handled separately in [`admin_cluster_rows`] because it also carries a sid).
-fn admin_rows(repos: &Repositories, tab: Tab) -> Result<Vec<Vec<String>>, DomainError> {
-    fn rows<T: Resource>(items: Vec<T>) -> Vec<Vec<String>> {
-        items.into_iter().map(|it| it.row()).collect()
-    }
-    match tab {
-        Tab::Users => ListUsers::new(repos.admin.as_ref()).execute().map(rows),
-        Tab::Roles => ListRoles::new(repos.admin.as_ref()).execute().map(rows),
-        Tab::Tokens => ListTokens::new(repos.admin.as_ref()).execute().map(rows),
-        Tab::Bots => ListBots::new(repos.admin.as_ref()).execute().map(rows),
-        Tab::Inventory => ListInstances::new(repos.admin.as_ref()).execute().map(rows),
-        _ => Ok(Vec::new()),
-    }
-}
-
-/// Run the listing for `tab` scoped to `ctx`, returning each item's display row.
-fn aggregate_rows(
-    repos: &Repositories,
-    tab: Tab,
-    ctx: &ClusterContext,
-) -> Result<Vec<Vec<String>>, DomainError> {
-    fn rows<T: Resource>(items: Vec<T>) -> Vec<Vec<String>> {
-        items.into_iter().map(|it| it.row()).collect()
-    }
-    match tab {
-        Tab::Ssh => ListNodes::new(repos.nodes.as_ref()).execute(ctx).map(rows),
-        Tab::Kube => ListKube::new(repos.kube.as_ref()).execute(ctx).map(rows),
-        Tab::Db => ListDatabases::new(repos.databases.as_ref())
-            .execute(ctx)
-            .map(rows),
-        Tab::Apps => ListApps::new(repos.apps.as_ref()).execute(ctx).map(rows),
-        Tab::Requests => ListRequests::new(repos.requests.as_ref())
-            .execute(ctx)
-            .map(rows),
-        Tab::Recordings => ListRecordings::new(repos.recordings.as_ref())
-            .execute(ctx)
-            .map(rows),
-        Tab::Users | Tab::Roles | Tab::Tokens | Tab::Bots | Tab::Inventory => Ok(Vec::new()),
     }
 }
 

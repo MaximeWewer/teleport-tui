@@ -651,15 +651,22 @@ fn superseded_scoped_admin_job_skips_its_work() {
     let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let repos = test_repos_with(Box::new(FakeAdmin), Box::new(recording_auth(&calls)));
     let latest = AtomicU64::new(7);
+    let users_job = || Job::List {
+        tab: Tab::Users,
+        ctx: None,
+    };
 
     let stale =
-        dispatch::run_scoped_if_latest(&repos, &latest, 5, Job::Users, &cn("leaf"), &cn("root"));
+        dispatch::run_scoped_if_latest(&repos, &latest, 5, users_job(), &cn("leaf"), &cn("root"));
     assert!(stale.is_empty());
     assert!(calls.lock().unwrap().is_empty());
 
     let current =
-        dispatch::run_scoped_if_latest(&repos, &latest, 7, Job::Users, &cn("leaf"), &cn("root"));
-    assert!(matches!(current.as_slice(), [JobResult::Users(Ok(u))] if u.len() == 1));
+        dispatch::run_scoped_if_latest(&repos, &latest, 7, users_job(), &cn("leaf"), &cn("root"));
+    assert!(matches!(
+        current.as_slice(),
+        [JobResult::List { tab: Tab::Users, result: Ok(Listing::Users(u)) }] if u.len() == 1
+    ));
     assert_eq!(
         *calls.lock().unwrap(),
         vec!["leaf".to_owned(), "root".to_owned()]
