@@ -13,6 +13,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::{self, sleep};
 use std::time::Duration;
 
+use application::command as cmd;
 use domain::value::{ClusterName, Hostname, Identifier, Login, ResourceName};
 
 /// How many fresh ports to try when an auto-allocated one is lost to the TOCTOU
@@ -122,12 +123,12 @@ fn start_listening_proxy(
     Err(last.unwrap_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "proxy did not start")))
 }
 
-/// Start `tsh proxy app <name> -c <cluster> -p <port>` in the background, wait
-/// until it is listening, open the browser at the local URL, and return the
-/// child handle (to stop it later) plus the URL.
+/// Start `tsh proxy app` ([`cmd::proxy_app`]) in the background, wait until it
+/// is listening, open the browser at the local URL, and return the child handle
+/// (to stop it later) plus the URL.
 ///
-/// SECURITY: `name`/`cluster` are validated value objects upstream; argv only,
-/// no shell. The URL is a fixed `http://127.0.0.1:<port>` we control.
+/// SECURITY: argv only (built by [`cmd`] from validated value objects), no
+/// shell. The URL is a fixed `http://127.0.0.1:<port>` we control.
 ///
 /// `port` is the caller-requested local port; `None` allocates a random free
 /// one (retried on a fresh port if it loses the TOCTOU race - see
@@ -145,15 +146,7 @@ pub(crate) fn open_app(
     let (child, port) = start_listening_proxy(port, |p| {
         spawn_tracked(
             Command::new(tsh)
-                .args([
-                    "proxy",
-                    "app",
-                    name.as_str(),
-                    "-c",
-                    cluster.as_str(),
-                    "-p",
-                    &p.to_string(),
-                ])
+                .args(cmd::proxy_app(cluster, name, p))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null()),
@@ -164,8 +157,8 @@ pub(crate) fn open_app(
     Ok((child, url))
 }
 
-/// Start `tsh proxy db <name> -c <cluster> --tunnel -p <port>` in the background
-/// and return the child plus the local endpoint (`127.0.0.1:<port>`) for the
+/// Start `tsh proxy db --tunnel` ([`cmd::proxy_db`]) in the background and
+/// return the child plus the local endpoint (`127.0.0.1:<port>`) for the
 /// user to point a DB client at. `--tunnel` authenticates via the database's
 /// client certificate, so the GUI tool connects without extra credentials.
 ///
@@ -184,16 +177,7 @@ pub(crate) fn open_db(
     let (child, port) = start_listening_proxy(port, |p| {
         spawn_tracked(
             Command::new(tsh)
-                .args([
-                    "proxy",
-                    "db",
-                    name.as_str(),
-                    "-c",
-                    cluster.as_str(),
-                    "--tunnel",
-                    "-p",
-                    &p.to_string(),
-                ])
+                .args(cmd::proxy_db(cluster, name, p))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null()),
@@ -202,8 +186,8 @@ pub(crate) fn open_db(
     Ok((child, format!("127.0.0.1:{port}")))
 }
 
-/// Start `tsh proxy kube <kube> -c <cluster> [--as <user>] -p <port>` in the
-/// background and return the child plus the `KUBECONFIG` path it printed.
+/// Start `tsh proxy kube` ([`cmd::proxy_kube`]) in the background and return
+/// the child plus the `KUBECONFIG` path it printed.
 ///
 /// Unlike `tsh proxy kube --exec`, the proxy stays silent in the background and
 /// we hand off a clean shell ourselves - so `tsh`'s raw-mode preamble never
@@ -252,24 +236,13 @@ fn kube_proxy_attempt(
     user: Option<&Identifier>,
     port: u16,
 ) -> Attempt<(Child, String)> {
-    let port_s = port.to_string();
-    let mut cmd = Command::new(tsh);
-    cmd.args([
-        "proxy",
-        "kube",
-        kube.as_str(),
-        "-c",
-        cluster.as_str(),
-        "-p",
-        &port_s,
-    ]);
-    if let Some(u) = user {
-        cmd.args(["--as", u.as_str()]);
-    }
-    cmd.stdin(Stdio::null())
+    let mut command = Command::new(tsh);
+    command
+        .args(cmd::proxy_kube(cluster, kube, user, port))
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = match spawn_tracked(&mut cmd) {
+    let mut child = match spawn_tracked(&mut command) {
         Ok(c) => c,
         Err(e) => return Attempt::Failed(e),
     };
@@ -311,15 +284,15 @@ fn kube_proxy_attempt(
     }
 }
 
-/// Start `tsh ssh -c <cluster> -L <spec> -N [<user>@]<host>` in the background
-/// (no shell - a pure local port-forward) and return the child once the tunnel is
+/// Start `tsh ssh -L <spec> -N` ([`cmd::ssh_forward`]) in the background (no
+/// shell - a pure local port-forward) and return the child once the tunnel is
 /// up. `spec` is a validated `[bind:]port:host:hostport` forward; no `user` lets
 /// tsh pick the default login.
 ///
 /// Readiness: see [`start_forward`].
 ///
-/// SECURITY: argv only, no shell; `cluster`/`user`/`host`/`spec` are validated
-/// upstream.
+/// SECURITY: argv only, no shell; `cluster`/`user`/`host` are validated value
+/// objects and `spec` is checked by the form.
 ///
 /// # Errors
 /// Returns an error if the child can't spawn or the tunnel doesn't come up.
@@ -330,11 +303,10 @@ pub(crate) fn start_ssh_forward(
     host: &Hostname,
     spec: &str,
 ) -> io::Result<Child> {
-    let target = user.map_or_else(|| host.to_string(), |u| format!("{u}@{host}"));
     start_forward(local_forward_port(spec), || {
         spawn_tracked(
             Command::new(tsh)
-                .args(["ssh", "-c", cluster.as_str(), "-L", spec, "-N", &target])
+                .args(cmd::ssh_forward(cluster, user, host, spec))
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null()),

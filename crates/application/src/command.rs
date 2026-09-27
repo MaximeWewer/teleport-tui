@@ -1,9 +1,11 @@
-//! Pure builders for the *interactive* `tsh` argv vectors the TUI hands to the
-//! terminal (login, ssh, db connect, scp, requests, logout).
+//! Pure builders for the `tsh` argv vectors the TUI runs itself: the
+//! *interactive* commands it hands the terminal to (login, ssh, db connect, scp,
+//! requests, logout) and the *background* local proxies / forwards it spawns
+//! (`tsh proxy app|db|kube`, `tsh ssh -L … -N`).
 //!
 //! These live in the application layer, not infrastructure: they perform **no
-//! I/O** - they only assemble the argv that the presentation layer expresses as
-//! an interactive intent and hands to the terminal itself. Keeping them here
+//! I/O** - they only assemble the argv; the presentation layer hands it to the
+//! terminal or spawns it. Keeping them here
 //! means the TUI orchestrates interactive commands through the application
 //! layer rather than reaching into `infrastructure`. The *read-path* argv (the
 //! commands infrastructure actually *executes* via the command runner) stays in
@@ -315,6 +317,68 @@ pub fn request_review(cluster: &ClusterName, id: &RequestId, approve: bool) -> V
     ]
 }
 
+/// `tsh proxy app <name> --cluster=<cluster> --port=<port>` - a background local
+/// proxy for an app behind an L7 load balancer.
+#[must_use]
+pub fn proxy_app(cluster: &ClusterName, name: &ResourceName, port: u16) -> Vec<String> {
+    vec![
+        "proxy".to_owned(),
+        "app".to_owned(),
+        name.to_string(),
+        format!("--cluster={cluster}"),
+        format!("--port={port}"),
+    ]
+}
+
+/// `tsh proxy db <name> --cluster=<cluster> --tunnel --port=<port>` - a background
+/// authenticated tunnel a GUI client connects to without extra credentials.
+#[must_use]
+pub fn proxy_db(cluster: &ClusterName, name: &ResourceName, port: u16) -> Vec<String> {
+    vec![
+        "proxy".to_owned(),
+        "db".to_owned(),
+        name.to_string(),
+        format!("--cluster={cluster}"),
+        "--tunnel".to_owned(),
+        format!("--port={port}"),
+    ]
+}
+
+/// `tsh proxy kube <kube> --cluster=<cluster> --port=<port> [--as=<user>]` - a
+/// background kube proxy that prints the `KUBECONFIG` to use. No `user` keeps
+/// the role's default impersonation.
+#[must_use]
+pub fn proxy_kube(
+    cluster: &ClusterName,
+    kube: &ResourceName,
+    user: Option<&Identifier>,
+    port: u16,
+) -> Vec<String> {
+    let mut args = vec![
+        "proxy".to_owned(),
+        "kube".to_owned(),
+        kube.to_string(),
+        format!("--cluster={cluster}"),
+        format!("--port={port}"),
+    ];
+    if let Some(user) = user {
+        args.push(format!("--as={user}"));
+    }
+    args
+}
+
+/// A background SSH local port-forward with no remote shell: [`ssh_full`] with
+/// `-L <spec> -N` and no command.
+#[must_use]
+pub fn ssh_forward(
+    cluster: &ClusterName,
+    user: Option<&Login>,
+    host: &Hostname,
+    spec: &str,
+) -> Vec<String> {
+    ssh_full(cluster, user, host, spec, true, "")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,5 +638,52 @@ mod tests {
         );
         assert_eq!(play(&sid("sid-1")), vec!["play", "sid-1"]);
         assert_eq!(join(&sid("sid-1")), vec!["join", "sid-1"]);
+    }
+
+    #[test]
+    fn background_proxy_shapes() {
+        let root = c("root");
+        assert_eq!(
+            proxy_app(&root, &r("grafana"), 8080),
+            vec!["proxy", "app", "grafana", "--cluster=root", "--port=8080"]
+        );
+        assert_eq!(
+            proxy_db(&root, &r("pg"), 5432),
+            vec![
+                "proxy",
+                "db",
+                "pg",
+                "--cluster=root",
+                "--tunnel",
+                "--port=5432"
+            ]
+        );
+        assert_eq!(
+            proxy_kube(&root, &r("prod"), None, 9000),
+            vec!["proxy", "kube", "prod", "--cluster=root", "--port=9000"]
+        );
+        assert_eq!(
+            proxy_kube(&root, &r("prod"), Some(&i("system:admin")), 9000),
+            vec![
+                "proxy",
+                "kube",
+                "prod",
+                "--cluster=root",
+                "--port=9000",
+                "--as=system:admin"
+            ]
+        );
+        assert_eq!(
+            ssh_forward(&root, None, &h("node-01"), "8080:localhost:80"),
+            vec![
+                "ssh",
+                "-c",
+                "root",
+                "-L",
+                "8080:localhost:80",
+                "-N",
+                "node-01"
+            ]
+        );
     }
 }
