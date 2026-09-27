@@ -4,25 +4,13 @@
 
 // nanoserde's derived `DeJson` impls expand to `?`-style blocks clippy flags;
 // suppress that pedantic noise for this DTO-heavy module only.
-#![allow(clippy::question_mark, clippy::wildcard_imports)]
+#![allow(clippy::question_mark)]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use domain::cluster::{ClusterContext, ClusterKind, ClusterStatus, ClusterTopology};
+use domain::cluster::ClusterContext;
 use domain::error::DomainError;
-use domain::mfa::MfaDevice;
-use domain::node::SshNode;
-use domain::port::{
-    AppRepository, AuthGateway, ClusterRepository, DatabaseRepository, KubeRepository,
-    NodeRepository, RecordingRepository, RequestRepository, SessionRepository,
-};
-use domain::profile::Profile;
-use domain::recording::SessionRecording;
-use domain::request::{AccessRequest, RequestState};
-use domain::resource::{App, Database, KubeCluster};
-use domain::session::ActiveSession;
-use domain::value::{ClusterName, Hostname, RequestId, ResourceName};
 use nanoserde::DeJson;
 
 use crate::process::{CommandRequest, CommandRunner};
@@ -147,14 +135,14 @@ impl<R: CommandRunner> TshCli<R> {
 macro_rules! tsh_adapter {
     ($name:ident) => {
         #[derive(Debug, Clone)]
-        pub struct $name<R: CommandRunner> {
-            cli: TshCli<R>,
+        pub struct $name<R: $crate::process::CommandRunner> {
+            cli: $crate::tsh::TshCli<R>,
         }
 
-        impl<R: CommandRunner> $name<R> {
-            pub fn new(runner: R, tsh: PathBuf) -> Self {
+        impl<R: $crate::process::CommandRunner> $name<R> {
+            pub fn new(runner: R, tsh: ::std::path::PathBuf) -> Self {
                 Self {
-                    cli: TshCli { runner, tsh },
+                    cli: $crate::tsh::TshCli { runner, tsh },
                 }
             }
         }
@@ -184,6 +172,8 @@ pub use session::TshSessionRepository;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::cluster::{ClusterKind, ClusterStatus};
+    use domain::value::ClusterName;
     #[test]
     fn classifies_not_logged_in() {
         assert!(matches!(

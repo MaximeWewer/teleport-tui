@@ -1,10 +1,19 @@
 //! `tsh request ls` → access requests. DTOs + repository adapter + parsers.
 //!
-//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`,
-//! `classify_failure`, `sorted_labels`, `MetaDto`) and imports come via `super::*`.
+//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`, `sorted_labels`,
+//! `MetaDto`) come from `super`.
 
-#![allow(clippy::question_mark, clippy::wildcard_imports)]
-use super::*;
+#![allow(clippy::question_mark)]
+
+use domain::cluster::ClusterContext;
+use domain::error::DomainError;
+use domain::port::RequestRepository;
+use domain::request::{AccessRequest, RequestState};
+use domain::value::RequestId;
+use nanoserde::DeJson;
+
+use super::{MetaDto, parse_json};
+use crate::process::CommandRunner;
 
 #[derive(Debug, DeJson)]
 struct RequestDto {

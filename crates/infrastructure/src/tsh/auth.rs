@@ -1,11 +1,20 @@
 //! `tsh status` / `tsh mfa ls` → profile + MFA devices, and `tsh login <cluster>`
 //! to re-select the active profile. DTOs + gateway adapter + parsers.
 //!
-//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`,
-//! `classify_failure`, `sorted_labels`, `MetaDto`) and imports come via `super::*`.
+//! Child of `tsh`: shared helpers (`TshCli`, `tsh_adapter!`, `parse_json`, `sorted_labels`,
+//! `MetaDto`) come from `super`.
 
-#![allow(clippy::question_mark, clippy::wildcard_imports)]
-use super::*;
+#![allow(clippy::question_mark)]
+
+use domain::error::DomainError;
+use domain::mfa::MfaDevice;
+use domain::port::AuthGateway;
+use domain::profile::Profile;
+use domain::value::ClusterName;
+use nanoserde::DeJson;
+
+use super::{args, parse_json};
+use crate::process::CommandRunner;
 
 #[derive(Debug, DeJson)]
 struct StatusDto {
@@ -165,7 +174,7 @@ fn parse_status_json(stdout: &str) -> Result<Option<Profile>, DomainError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process::CommandOutcome;
+    use crate::process::{CommandOutcome, CommandRequest};
 
     /// Runner that fails every command with `stderr`.
     #[derive(Debug)]
