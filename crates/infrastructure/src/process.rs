@@ -1,7 +1,7 @@
 //! Subprocess execution seam.
 //!
 //! SECURITY: commands are built as an **argv vector** and run via
-//! `std::process::Command` -never a shell, never string concatenation. This
+//! `std::process::Command` - never a shell, never string concatenation. This
 //! eliminates command injection. The `CommandRunner` trait lets tests inject
 //! canned output without spawning a process.
 
@@ -73,7 +73,7 @@ pub struct SystemCommandRunner;
 impl CommandRunner for SystemCommandRunner {
     fn run(&self, req: &CommandRequest) -> std::io::Result<CommandOutcome> {
         // No shell (argv vector). `stdin` is detached so a read-path command can
-        // never block on -or steal keystrokes from -the terminal the TUI owns on
+        // never block on - or steal keystrokes from - the terminal the TUI owns on
         // another thread. `LC_ALL=C` pins tsh's human-readable messages to the
         // English form `classify_failure` matches, regardless of the user's locale.
         let mut child = Command::new(&req.bin)

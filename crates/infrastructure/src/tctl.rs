@@ -190,13 +190,13 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
             return Err(DomainError::InvalidValue { field: "cluster" });
         }
         // `tsh login <cluster>` (POSITIONAL) selects a cluster under the current
-        // proxy -the root or a trusted leaf -so the following `tctl` call, which
+        // proxy - the root or a trusted leaf - so the following `tctl` call, which
         // targets whatever cluster the profile has selected, hits the right one.
         // NOT `tsh login --proxy=<cluster>`: `--proxy` is a proxy *address*, not a
         // cluster, so passing a cluster name there left the selected cluster (and
         // thus `tctl`) pointed at the previous one. With a valid cached cert this
-        // is instant and silent; without one tsh would need a password -impossible
-        // here (no tty) -so a non-zero exit means "login required".
+        // is instant and silent; without one tsh would need a password - impossible
+        // here (no tty) - so a non-zero exit means "login required".
         let req = CommandRequest::new(
             self.tsh.clone(),
             vec!["login".to_owned(), cluster.to_owned()],
@@ -215,7 +215,7 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
     fn generate_token(&self, token_type: &str) -> Result<GeneratedToken, DomainError> {
         // SECURITY: stdout contains the secret token; it is parsed and returned
         // for one-time display, but never written to logs. On failure only the
-        // (redacted) stderr is surfaced -never stdout.
+        // (redacted) stderr is surfaced - never stdout.
         let req = CommandRequest::new(
             self.tctl.clone(),
             vec![
@@ -234,7 +234,7 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
         }
         // stdout carries the secret token verbatim. Hold it in a zeroizing
         // buffer so the JSON (token included) is scrubbed from memory as soon
-        // as parsing extracts the fields -it must not linger in freed heap.
+        // as parsing extracts the fields - it must not linger in freed heap.
         let stdout = Zeroizing::new(outcome.stdout);
         parse_token(&stdout)
     }
@@ -252,7 +252,7 @@ struct TokenDto {
 }
 
 fn parse_token(stdout: &str) -> Result<GeneratedToken, DomainError> {
-    // On parse failure, surface only a generic message -the input may contain
+    // On parse failure, surface only a generic message - the input may contain
     // the secret token, so it must not appear in the error detail.
     let dto: TokenDto = DeJson::deserialize_json(stdout).map_err(|_| DomainError::Parse {
         detail: "could not parse token JSON".to_owned(),
@@ -273,7 +273,7 @@ struct ProvisionTokenDto {
 
 #[derive(Debug, DeJson)]
 struct ProvisionTokenMetaDto {
-    /// The token's name (its identifier) -the "Token" column of `tctl tokens ls`.
+    /// The token's name (its identifier) - the "Token" column of `tctl tokens ls`.
     name: String,
     #[nserde(default)]
     expires: String,
@@ -283,7 +283,7 @@ struct ProvisionTokenMetaDto {
 
 #[derive(Debug, DeJson)]
 struct ProvisionTokenSpecDto {
-    /// The token's type(s) (`Bot`, `Node`, …) -the "Type" column.
+    /// The token's type(s) (`Bot`, `Node`, …) - the "Type" column.
     #[nserde(default)]
     roles: Vec<String>,
 }
@@ -382,7 +382,7 @@ fn parse_instances(stdout: &str) -> Result<Vec<Instance>, DomainError> {
 
 fn parse_invite(user: &str, stdout: &str) -> Result<InviteLink, DomainError> {
     // The setup URL is the first http(s) token in the output; it embeds the
-    // one-time secret. On failure, surface only a generic message -the output
+    // one-time secret. On failure, surface only a generic message - the output
     // may contain the URL/secret and must not appear in the error detail.
     stdout
         .split_whitespace()

@@ -15,7 +15,7 @@ mod chrome;
 mod forms;
 mod overlays;
 // Bring the child render fns into scope for the `render` dispatcher below, and —
-// since the children `use super::*` -for cross-module calls between them.
+// since the children `use super::*` - for cross-module calls between them.
 #[allow(clippy::wildcard_imports)]
 use body::*;
 #[allow(clippy::wildcard_imports)]

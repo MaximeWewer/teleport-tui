@@ -1,5 +1,5 @@
 //! Optional user config (`config.toml`). Deliberately a tiny hand-rolled
-//! flat `key = value` parser -no TOML dependency (attack-surface constraint).
+//! flat `key = value` parser - no TOML dependency (attack-surface constraint).
 //! Unknown keys are ignored; a missing/unreadable file yields defaults.
 
 use std::path::{Path, PathBuf};

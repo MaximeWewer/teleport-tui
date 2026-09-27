@@ -36,7 +36,7 @@ struct RecordingDto {
     sid: String,
     #[nserde(default)]
     session_start: String,
-    /// The `session.end` event timestamp -the session's end, used with
+    /// The `session.end` event timestamp - the session's end, used with
     /// `session_start` to compute a display duration.
     #[nserde(default)]
     time: String,
@@ -55,8 +55,8 @@ fn parse_recordings(stdout: &str) -> Result<Vec<SessionRecording>, DomainError> 
         })?;
     // `tsh recordings ls` returns a raw audit-event stream. Keep only the
     // `session.end` events (a completed, playable SSH/kube recording, keyed by
-    // `sid`); this drops the streaming `app.session.chunk` events -which are the
-    // ones that carry secret `user_traits` (a JWT) -so nothing secret is shown.
+    // `sid`); this drops the streaming `app.session.chunk` events - which are the
+    // ones that carry secret `user_traits` (a JWT) - so nothing secret is shown.
     Ok(dtos
         .into_iter()
         .filter(|d| d.event == "session.end" && !d.sid.is_empty())
@@ -78,7 +78,7 @@ fn parse_recordings(stdout: &str) -> Result<Vec<SessionRecording>, DomainError> 
 }
 
 /// Seconds-since-epoch for an RFC 3339 UTC timestamp (`YYYY-MM-DDThh:mm:ss…Z`),
-/// using only the leading `…ss` -fractional seconds and the zone suffix are
+/// using only the leading `…ss` - fractional seconds and the zone suffix are
 /// ignored (Teleport always emits `Z`). Returns `None` on a malformed prefix.
 /// Uses Howard Hinnant's `days_from_civil` so no date-library dependency is
 /// pulled into this minimal-deps crate.
@@ -136,7 +136,7 @@ mod tests {
         // A `session.end` event as tsh actually emits it: a dotted key
         // (`addr.remote`), nested objects/arrays (server_labels, user_roles,
         // user_traits, participants). nanoserde must skip all undeclared fields
-        // and still populate `sid` -the id `tsh play` needs.
+        // and still populate `sid` - the id `tsh play` needs.
         let json = r#"[
             {"ei":0,"event":"session.end","uid":"0000","code":"T2004I",
              "time":"2026-06-29T16:30:26.000Z","cluster_name":"root.example",

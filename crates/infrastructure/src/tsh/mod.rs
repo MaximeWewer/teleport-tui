@@ -49,7 +49,7 @@ pub(crate) fn classify_failure(stderr: &str) -> DomainError {
 /// domain vocabulary: a spawn error becomes `Backend { code: spawn_code, … }`, a
 /// non-zero exit is routed through [`classify_failure`] (auth/expired/backend).
 /// Shared by both adapters so the spawn→classify boilerplate lives in one place.
-/// Not for secret-bearing output (token/invite) -those hold the raw outcome in
+/// Not for secret-bearing output (token/invite) - those hold the raw outcome in
 /// zeroizing storage instead.
 pub(crate) fn run_cli(
     runner: &impl CommandRunner,

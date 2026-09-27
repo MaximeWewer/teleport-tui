@@ -35,7 +35,7 @@ type Tui = Terminal<CrosstermBackend<Stdout>>;
 /// once the session starts: the user sees only `tsh`'s own output (its
 /// connection progress, an MFA prompt, then the remote shell). We tried a
 /// transient banner, but with stdio inherited (no PTY, by design) there is no
-/// "connected" signal to erase it on -and letting `tsh`'s shorter first line
+/// "connected" signal to erase it on - and letting `tsh`'s shorter first line
 /// overwrite ours left a visible tail on the prompt row. `label` is unused for
 /// on-screen output here; the connection delay is covered by `tsh`'s own
 /// progress/prompts.
@@ -112,7 +112,7 @@ pub(crate) fn run_interactive(
             out,
             SetForegroundColor(Color::DarkGrey),
             Print(format!(
-                "\r\n-command finished ({note}) · press any key to return —"
+                "\r\n- command finished ({note}) · press any key to return —"
             )),
             ResetColor,
         )?;
@@ -122,7 +122,7 @@ pub(crate) fn run_interactive(
 
     // Resume the TUI regardless of the child's exit status: back into the
     // alternate screen (the session's output stays behind in the main buffer's
-    // scrollback), then re-arm mouse capture -released for the child above -so
+    // scrollback), then re-arm mouse capture - released for the child above - so
     // the wheel scrolls the lists again.
     enable_raw_mode()?;
     execute!(
@@ -150,7 +150,7 @@ fn wait_any_key() -> io::Result<()> {
 
 /// Play a recorded session (`tsh play`) interruptibly: unlike [`run_interactive`],
 /// the TUI keeps the keyboard so **Esc / q / Ctrl-C stops the replay and returns
-/// to the TUI** -`tsh play` itself only quits on SIGINT, which is unintuitive.
+/// to the TUI** - `tsh play` itself only quits on SIGINT, which is unintuitive.
 ///
 /// Raw mode stays **on** (so a bare Esc is one byte, and Ctrl-C is a key rather
 /// than a signal that would kill the TUI); the child renders the replay to the

@@ -1,4 +1,4 @@
-//! Application layer -use cases that orchestrate the domain through its ports.
+//! Application layer - use cases that orchestrate the domain through its ports.
 //! Depends only on `domain`, so use cases are testable with fake adapters.
 #![cfg_attr(
     test,

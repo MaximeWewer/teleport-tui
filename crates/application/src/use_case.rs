@@ -1,4 +1,4 @@
-//! Use cases -one type per business intention. Each holds a port (injected as
+//! Use cases - one type per business intention. Each holds a port (injected as
 //! a trait object) and orchestrates the domain. No business rules, no I/O here.
 
 use domain::admin::{
@@ -134,7 +134,7 @@ impl<'a> ListUsers<'a> {
     }
 }
 
-/// Generate a join token (admin). The returned token is a secret -display
+/// Generate a join token (admin). The returned token is a secret - display
 /// once, never log.
 #[derive(Debug)]
 pub struct GenerateToken<'a> {
@@ -155,7 +155,7 @@ impl<'a> GenerateToken<'a> {
 }
 
 /// List active provision (join) tokens (admin). Each result carries a secret
-/// value -the caller must move it into zeroizing storage and never log it.
+/// value - the caller must move it into zeroizing storage and never log it.
 #[derive(Debug)]
 pub struct ListTokens<'a> {
     repo: &'a dyn AdminRepository,
@@ -214,7 +214,7 @@ impl<'a> AddUser<'a> {
 }
 
 /// Reset a user's password and second factors (admin). The returned reset URL
-/// is a secret -display once, never log.
+/// is a secret - display once, never log.
 #[derive(Debug)]
 pub struct ResetUser<'a> {
     repo: &'a dyn AdminRepository,

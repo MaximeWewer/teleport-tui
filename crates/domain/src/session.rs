@@ -1,4 +1,4 @@
-//! Active sessions (`tsh sessions ls`) -live sessions one can join.
+//! Active sessions (`tsh sessions ls`) - live sessions one can join.
 
 use crate::resource::Resource;
 

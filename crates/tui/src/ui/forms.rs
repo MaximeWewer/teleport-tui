@@ -140,7 +140,7 @@ pub(super) fn render_proxy(frame: &mut Frame, app: &App) {
     };
     let text = vec![
         Line::from(Span::styled(
-            format!("{heading} -{}", proxy.name),
+            format!("{heading} - {}", proxy.name),
             Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
@@ -223,19 +223,19 @@ pub(super) fn render_settings(frame: &mut Frame, app: &App) {
             "SSH login    ",
             f.ssh_login.clone(),
             false,
-            "default SSH user -set = connect without the picker",
+            "default SSH user - set = connect without the picker",
         ),
         (
             "Kube user    ",
             f.kube_user.clone(),
             false,
-            "default kube user (--as) -set = skip the picker",
+            "default kube user (--as) - set = skip the picker",
         ),
         (
             "DB user      ",
             f.db_user.clone(),
             false,
-            "default db user (--db-user) -set = skip the prompt",
+            "default db user (--db-user) - set = skip the prompt",
         ),
         (
             "Login proxy  ",
@@ -253,19 +253,19 @@ pub(super) fn render_settings(frame: &mut Frame, app: &App) {
             "Login auth   ",
             or_default(f.auth_str()),
             true,
-            "←/→ -login connector default",
+            "←/→ - login connector default",
         ),
         (
             "Login MFA    ",
             or_default(f.mfa_str()),
             true,
-            "←/→ -login MFA mode default",
+            "←/→ - login MFA mode default",
         ),
         (
             "Refresh secs ",
             f.refresh.clone(),
             false,
-            "auto-refresh interval (blank/0 = off) -applies next launch",
+            "auto-refresh interval (blank/0 = off) - applies next launch",
         ),
         (
             "Kube tools   ",
@@ -275,7 +275,7 @@ pub(super) fn render_settings(frame: &mut Frame, app: &App) {
         ),
     ];
     let lines = form_lines(
-        "Settings -default behaviours (persisted to config.toml)",
+        "Settings - default behaviours (persisted to config.toml)",
         &rows,
         f.field,
         &["Tab/↑↓ move · type or ←/→ to edit · Enter save · Esc cancel"],
@@ -329,7 +329,7 @@ pub(super) fn render_scp(frame: &mut Frame, app: &App) {
         ),
     ];
     let lines = form_lines(
-        &format!("Transfer files -{} ({})", f.host, f.cluster),
+        &format!("Transfer files - {} ({})", f.host, f.cluster),
         &rows,
         f.field,
         &["Tab/↑↓ move · type or ←/→ to edit · Enter transfer · Esc cancel"],
@@ -372,11 +372,11 @@ pub(super) fn render_ssh_options(frame: &mut Frame, app: &App) {
             "Command ",
             f.command.clone(),
             false,
-            "optional -run this instead of a shell (blank = shell)",
+            "optional - run this instead of a shell (blank = shell)",
         ),
     ];
     let lines = form_lines(
-        &format!("SSH options -{} ({})", f.host, f.cluster),
+        &format!("SSH options - {} ({})", f.host, f.cluster),
         &rows,
         f.field,
         &["Tab/↑↓ move · type or ←/→ to edit · Enter connect · Esc cancel"],
@@ -431,13 +431,13 @@ pub(super) fn render_kube_exec(frame: &mut Frame, app: &App) {
             "container",
             f.container.clone(),
             false,
-            "optional -defaults to the pod's first/annotated container",
+            "optional - defaults to the pod's first/annotated container",
         ),
         (
             "namespace",
             f.namespace.clone(),
             false,
-            "optional -defaults to the configured namespace",
+            "optional - defaults to the configured namespace",
         ),
     ];
     let lines = form_lines(

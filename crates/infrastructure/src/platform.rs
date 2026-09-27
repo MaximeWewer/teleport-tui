@@ -141,7 +141,7 @@ fn config_base() -> Option<PathBuf> {
 }
 
 /// Best-effort tighten a directory to owner-only (0700) on Unix. No-op
-/// elsewhere and on failure -purely defence-in-depth on a shared host.
+/// elsewhere and on failure - purely defence-in-depth on a shared host.
 pub fn restrict_dir(path: &Path) {
     restrict(path, 0o700);
 }

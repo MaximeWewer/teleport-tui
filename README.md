@@ -1,7 +1,7 @@
 # teleport-tui
 
 **One keyboard-driven dashboard over all your Teleport resources.** Browse, search and
-connect to SSH nodes, Kubernetes clusters, databases and apps -across every cluster —
+connect to SSH nodes, Kubernetes clusters, databases and apps - across every cluster —
 without leaving the terminal or remembering a single `tsh` flag.
 
 `teleport-tui` is a fast Rust + [ratatui](https://github.com/ratatui/ratatui) front-end
@@ -12,7 +12,7 @@ terminal straight to `tsh` for the interactive parts (SSH sessions, MFA prompts,
 the real client.
 
 > Runs whatever `tsh`/`tctl` you already have installed and respects your existing login.
-> `tctl` is optional -admin features simply appear when it's available.
+> `tctl` is optional - admin features simply appear when it's available.
 
 ## Why
 
@@ -22,24 +22,24 @@ that into: open, arrow to the thing, press `Enter`.
 
 ## What it does
 
-- **Everything in one place** -SSH nodes, Kubernetes, Databases, Apps, Access requests,
+- **Everything in one place** - SSH nodes, Kubernetes, Databases, Apps, Access requests,
   session Recordings, and admin (Users, Roles, Tokens, Bots, Inventory) as searchable
   tables. Hit `/` to filter; `Enter` on an admin row shows every field in a popup.
-- **Connect in one keystroke** -`Enter` opens an SSH session, `kube login`, `db connect`
+- **Connect in one keystroke** - `Enter` opens an SSH session, `kube login`, `db connect`
   or `apps login`. Several logins available? It offers a picker. No flags to memorise.
-- **All your clusters at once** -a switcher (`c`) jumps between root/leaf, or pick
+- **All your clusters at once** - a switcher (`c`) jumps between root/leaf, or pick
   **All clusters** to see any tab aggregated across every online cluster in one view.
-- **Port-forwards that don't block you** -the SSH options popup (`o`) builds a `-L`
+- **Port-forwards that don't block you** - the SSH options popup (`o`) builds a `-L`
   tunnel; a `-N` tunnel runs **in the background** and lands in a forwards list you manage
   with `F` (stop any of them anytime). Or fire a one-off command on a node and read its
   output before returning.
-- **The rest of the toolbox** -`scp` transfers (`s`), `kube exec` into a pod (`e`), a
+- **The rest of the toolbox** - `scp` transfers (`s`), `kube exec` into a pod (`e`), a
   background `proxy db` tunnel for your GUI database client (`P`), certificate login/logout
   (`l`/`u`), replay a session recording (`Enter`), list/join live sessions (`S`), and
   manage MFA devices (`M`).
-- **Admin without the man page** -create/reset users, generate/remove join tokens; the
+- **Admin without the man page** - create/reset users, generate/remove join tokens; the
   token and invite URL are shown once and never written to disk or logs.
-- **Adapts to you** -probes your `tsh`/`tctl` and hides tabs/actions the binary can't run
+- **Adapts to you** - probes your `tsh`/`tctl` and hides tabs/actions the binary can't run
   or your role can't access. Mouse-wheel scrolling, a live status bar (user, logins, cert
   expiry), and defaults you can edit and persist (`p`).
 
@@ -47,7 +47,7 @@ that into: open, arrow to the thing, press `Enter`.
 
 It's a front-end for a security product, so it behaves like one:
 
-- Subprocesses are **argv vectors, never a shell** -no command injection. Every typed
+- Subprocesses are **argv vectors, never a shell** - no command injection. Every typed
   value (hostnames, logins, forward specs, commands…) is validated before it becomes an
   argument.
 - Secrets are never logged: tokens and invite URLs are held zeroized and shown once;
@@ -58,7 +58,7 @@ It's a front-end for a security product, so it behaves like one:
 
 ## Install & run
 
-**Runs on Linux, macOS and Windows** -config, state and binary paths are resolved
+**Runs on Linux, macOS and Windows** - config, state and binary paths are resolved
 per-OS, and CI builds and tests on all three.
 
 ### From a release (prebuilt binary)
@@ -67,7 +67,7 @@ Grab the archive for your platform from the
 [Releases](https://github.com/MaximeWewer/teleport-tui/releases) page, then drop the
 binary somewhere on your `PATH` so you can call `teleport-tui` from any shell.
 
-**Linux** (`…-linux-x86_64.tar.gz`) -statically linked (musl)
+**Linux** (`…-linux-x86_64.tar.gz`) - statically linked (musl)
 
 ```bash
 tar xzf teleport-tui-*-linux-x86_64.tar.gz
@@ -78,7 +78,7 @@ sudo install -m 755 teleport-tui /usr/local/bin/    # all users; on PATH by defa
 teleport-tui
 ```
 
-**macOS -Apple Silicon** (`…-macos-arm64.tar.gz`)
+**macOS - Apple Silicon** (`…-macos-arm64.tar.gz`)
 
 ```bash
 tar xzf teleport-tui-*-macos-arm64.tar.gz
@@ -87,7 +87,7 @@ sudo install -m 755 teleport-tui /usr/local/bin/
 teleport-tui
 ```
 
-The binary is unsigned, so Gatekeeper quarantines it on first download -the `xattr`
+The binary is unsigned, so Gatekeeper quarantines it on first download - the `xattr`
 above clears it (or allow it once via System Settings → Privacy & Security).
 
 **Windows** (`…-windows-x86_64.zip`)
@@ -130,7 +130,7 @@ Actions are context-sensitive (tab + selection) and gated by capabilities/rights
 | `Enter` | open (SSH/kube/db/app/request), admin row → detail popup, recording → replay |
 | `c` | switch cluster (root/leaf) or **All clusters** aggregate |
 | `r` | refresh current tab |
-| `o` | SSH: options -`-L` forward, `-N` background tunnel, or a one-off command |
+| `o` | SSH: options - `-L` forward, `-N` background tunnel, or a one-off command |
 | `F` | list / stop active background SSH forwards |
 | `s` | SSH: scp file/folder transfer |
 | `e` | Kube: exec a command in a pod |
@@ -148,11 +148,11 @@ Actions are context-sensitive (tab + selection) and gated by capabilities/rights
 ## Configuration
 
 Everything works out of the box. For defaults, drop a `config.toml` in your per-OS config
-dir -or just edit and save it from the Settings screen (`p`):
+dir - or just edit and save it from the Settings screen (`p`):
 
-- **Linux** -`$XDG_CONFIG_HOME/teleport-tui/config.toml` (default `~/.config/…`)
-- **macOS** -`~/Library/Application Support/teleport-tui/config.toml`
-- **Windows** -`%APPDATA%\teleport-tui\config.toml`
+- **Linux** - `$XDG_CONFIG_HOME/teleport-tui/config.toml` (default `~/.config/…`)
+- **macOS** - `~/Library/Application Support/teleport-tui/config.toml`
+- **Windows** - `%APPDATA%\teleport-tui\config.toml`
 
 ```toml
 # Override binary locations (otherwise resolved from PATH / known install dirs)
@@ -183,9 +183,9 @@ mfa   = "otp"     # "" | otp | webauthn | platform | sso | browser
 Structured errors are appended as JSON Lines to the per-OS state dir, so you can grep a
 bad run:
 
-- **Linux** -`$XDG_STATE_HOME/teleport-tui/errors.jsonl` (default `~/.local/state/…`)
-- **macOS** -`~/Library/Logs/teleport-tui/errors.jsonl`
-- **Windows** -`%LOCALAPPDATA%\teleport-tui\errors.jsonl`
+- **Linux** - `$XDG_STATE_HOME/teleport-tui/errors.jsonl` (default `~/.local/state/…`)
+- **macOS** - `~/Library/Logs/teleport-tui/errors.jsonl`
+- **Windows** - `%LOCALAPPDATA%\teleport-tui\errors.jsonl`
 
 ```bash
 jq 'select(.code=="CERT_EXPIRED")' ~/.local/state/teleport-tui/errors.jsonl
@@ -194,7 +194,7 @@ jq 'select(.code=="CERT_EXPIRED")' ~/.local/state/teleport-tui/errors.jsonl
 ## Under the hood
 
 Rust + ratatui, laid out as a hexagonal/DDD Cargo workspace (`domain` / `application` /
-`infrastructure` / `tui`) so the core has zero knowledge of ratatui, `tsh` or JSON -which
+`infrastructure` / `tui`) so the core has zero knowledge of ratatui, `tsh` or JSON - which
 keeps it testable and the CLI adapters swappable. Contributions welcome; the CI quality
 gate runs on Linux/macOS/Windows:
 

@@ -22,12 +22,12 @@ const PORT_RETRIES: usize = 3;
 /// (worth retrying on a new port) from a real failure (retrying won't help).
 enum Attempt<T> {
     Ready(T),
-    /// The child exited before it was ready -the auto-allocated port was almost
+    /// The child exited before it was ready - the auto-allocated port was almost
     /// certainly taken between `free_port()` releasing it and the child binding
     /// it. Retrying on a fresh port should succeed.
     PortLost,
     /// The child is alive but never became ready (stuck on a login/MFA prompt it
-    /// can't answer with detached stdin, say) -not a port problem, so surface it.
+    /// can't answer with detached stdin, say) - not a port problem, so surface it.
     Failed(io::Error),
 }
 
@@ -53,7 +53,7 @@ fn await_listen(child: &mut Child, port: u16) -> Attempt<()> {
 }
 
 /// Spawn a background proxy that becomes ready by *listening* on a local port
-/// (app / db). For an explicit `port` a single attempt is made -a conflict on
+/// (app / db). For an explicit `port` a single attempt is made - a conflict on
 /// the user's chosen port is theirs to resolve, not silently relocated. For an
 /// auto port the OS-picked number can be stolen in the TOCTOU window between
 /// `free_port()` and the child's own bind, so a lost race retries on a fresh one.
@@ -85,7 +85,7 @@ fn start_listening_proxy(
         let mut child = spawn(port)?;
         match await_listen(&mut child, port) {
             Attempt::Ready(()) => return Ok((child, port)),
-            // Racey port: the child already exited -reap it and try another.
+            // Racey port: the child already exited - reap it and try another.
             Attempt::PortLost => {
                 let _ = child.wait();
                 last = Some(io::Error::new(
@@ -111,7 +111,7 @@ fn start_listening_proxy(
 /// no shell. The URL is a fixed `http://127.0.0.1:<port>` we control.
 ///
 /// `port` is the caller-requested local port; `None` allocates a random free
-/// one (retried on a fresh port if it loses the TOCTOU race -see
+/// one (retried on a fresh port if it loses the TOCTOU race - see
 /// [`start_listening_proxy`]). A requested port already in use is an error.
 ///
 /// # Errors
@@ -181,7 +181,7 @@ pub(crate) fn open_db(
 /// background and return the child plus the `KUBECONFIG` path it printed.
 ///
 /// Unlike `tsh proxy kube --exec`, the proxy stays silent in the background and
-/// we hand off a clean shell ourselves -so `tsh`'s raw-mode preamble never
+/// we hand off a clean shell ourselves - so `tsh`'s raw-mode preamble never
 /// corrupts the user's terminal (no "staircase" output, resize works).
 ///
 /// The auto-allocated local port can be lost to the TOCTOU race between
@@ -280,7 +280,7 @@ fn kube_proxy_attempt(
 }
 
 /// Start `tsh ssh -c <cluster> -L <spec> -N [<user>@]<host>` in the background
-/// (no shell -a pure local port-forward) and return the child once the tunnel is
+/// (no shell - a pure local port-forward) and return the child once the tunnel is
 /// up. `spec` is a validated `[bind:]port:host:hostport` forward; a blank `user`
 /// lets tsh pick the default login.
 ///
@@ -455,7 +455,7 @@ fn browser_command(url: &str) -> Command {
 
 #[cfg(target_os = "windows")]
 fn browser_command(url: &str) -> Command {
-    // `cmd /C start "" <url>` -empty title arg so the URL isn't taken as title.
+    // `cmd /C start "" <url>` - empty title arg so the URL isn't taken as title.
     let mut c = Command::new("cmd");
     c.args(["/C", "start", "", url]);
     c

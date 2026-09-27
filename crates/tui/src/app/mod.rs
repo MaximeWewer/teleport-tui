@@ -79,7 +79,7 @@ pub(crate) struct App {
     pub(crate) recordings: Vec<SessionRecording>,
     pub(crate) users: Vec<AdminUser>,
     pub(crate) roles: Vec<AdminRole>,
-    /// Provision tokens (Tokens tab) -a plain admin listing (name/type/labels/
+    /// Provision tokens (Tokens tab) - a plain admin listing (name/type/labels/
     /// expiry), exactly what `tctl tokens ls` prints. No secret in the listing.
     pub(crate) tokens: Vec<ProvisionToken>,
     /// Machine ID bots (Bots tab) and connected agent instances (Inventory tab).
@@ -97,7 +97,7 @@ pub(crate) struct App {
     /// Held while the one-time invite/reset URL popup is open; scrubbed on dismiss.
     pub(crate) invite_view: Option<InviteView>,
     /// Held while the MFA-devices popup is open (`tsh mfa ls`). Public-key
-    /// metadata only -not secret.
+    /// metadata only - not secret.
     pub(crate) mfa_devices: Vec<MfaDevice>,
     /// Selected row in the MFA popup; device awaiting `tsh mfa rm` confirmation.
     pub(crate) mfa_sel: usize,
@@ -147,7 +147,7 @@ pub(crate) struct App {
     agg_pending: usize,
     /// Per-`(tab, cluster)` cache of an all-clusters fan-out: each cluster's rows
     /// are cached independently as they arrive, so **partial** progress survives
-    /// navigating away -on return, cached clusters render instantly and only the
+    /// navigating away - on return, cached clusters render instantly and only the
     /// missing ones are re-fetched (no restart from zero). Cleared per-cluster on
     /// login, per-tab on `r`, and wholesale on topology change / logout.
     agg_cache: HashMap<(Tab, String), Vec<AggRow>>,
@@ -165,7 +165,7 @@ pub(crate) struct App {
     pub(crate) admin_allowed: bool,
     /// Whether the admin-rights probe has returned. Until it has, the admin tabs
     /// are prefetched *optimistically* (in parallel with the slow `tctl status`
-    /// probe) rather than waiting for it -their `tctl` listings are ~3s each, so
+    /// probe) rather than waiting for it - their `tctl` listings are ~3s each, so
     /// gating them behind the probe left the tabs cold for several seconds.
     admin_probed: bool,
     /// In-progress `tsh scp` transfer form (SSH nodes only).

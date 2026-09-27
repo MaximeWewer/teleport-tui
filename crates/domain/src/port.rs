@@ -1,4 +1,4 @@
-//! Ports -traits the application depends on, implemented by infrastructure
+//! Ports - traits the application depends on, implemented by infrastructure
 //! adapters. The dependency rule points inward: domain declares, infra fulfils.
 
 use crate::admin::{
@@ -19,7 +19,7 @@ use crate::session::ActiveSession;
 /// adapt to the actual binary (runtime detection, not compile-time `cfg`).
 pub trait CapabilityProbe: std::fmt::Debug + Send + Sync {
     /// Best-effort: returns [`Capabilities::unknown`] (permissive) on any
-    /// failure, never an error -a probe miss must not hide working features.
+    /// failure, never an error - a probe miss must not hide working features.
     fn probe(&self) -> Capabilities;
 }
 
@@ -89,14 +89,14 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
     /// Returns [`DomainError`] on failure.
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError>;
     /// Generate a join token of the given comma-separated type(s). The returned
-    /// token is a secret -display once, never log.
+    /// token is a secret - display once, never log.
     ///
     /// # Errors
     /// Returns [`DomainError`] on failure.
     fn generate_token(&self, token_type: &str) -> Result<GeneratedToken, DomainError>;
 
     /// List active provision (join) tokens (`tctl tokens ls`). Each carries its
-    /// secret value -treat the result like a secret (zeroize, never log).
+    /// secret value - treat the result like a secret (zeroize, never log).
     ///
     /// # Errors
     /// Returns [`DomainError`] on failure. Defaults to "unsupported" so adapters
@@ -114,7 +114,7 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
     }
 
     /// Create a user with the given comma-separated roles (`tctl users add`),
-    /// returning the one-time setup [`InviteLink`] (a secret -show once).
+    /// returning the one-time setup [`InviteLink`] (a secret - show once).
     ///
     /// # Errors
     /// Returns [`DomainError`] on failure.
@@ -123,7 +123,7 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
     }
 
     /// Reset a user's password and second factors (`tctl users reset`),
-    /// returning the one-time reset [`InviteLink`] (a secret -show once).
+    /// returning the one-time reset [`InviteLink`] (a secret - show once).
     ///
     /// # Errors
     /// Returns [`DomainError`] on failure.
@@ -158,8 +158,8 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
 
     /// Select the Teleport `cluster` (root or a trusted leaf under the current
     /// proxy) so subsequent `tctl` calls target its auth (`tsh login <cluster>`,
-    /// positional). `tctl` has no per-command cluster flag -it always talks to
-    /// the *currently selected* cluster -so all-clusters admin (and scoped admin
+    /// positional). `tctl` has no per-command cluster flag - it always talks to
+    /// the *currently selected* cluster - so all-clusters admin (and scoped admin
     /// off the root) must re-select each cluster in turn.
     ///
     /// Non-interactive: succeeds only when a valid cached session for `cluster`

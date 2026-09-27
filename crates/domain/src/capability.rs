@@ -1,4 +1,4 @@
-//! Runtime CLI capabilities -what the *installed* `tsh` actually supports.
+//! Runtime CLI capabilities - what the *installed* `tsh` actually supports.
 //!
 //! Detection is **runtime** (probe the binary), never `#[cfg(target_os)]`: an
 //! old `tsh` on Linux exposes fewer commands than a recent one, and the OS of

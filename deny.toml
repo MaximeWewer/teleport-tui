@@ -1,4 +1,4 @@
-# cargo-deny -supply-chain & license gate (run in CI via cargo-deny-action).
+# cargo-deny - supply-chain & license gate (run in CI via cargo-deny-action).
 # Enforces the project's constraints: crates.io-only sources, vetted licenses,
 # no known vulnerabilities, no wildcard version requirements.
 
@@ -29,6 +29,6 @@ wildcards = "deny"
 allow-wildcard-paths = true
 
 [sources]
-# Dependencies must come from crates.io -no unknown registries or git sources.
+# Dependencies must come from crates.io - no unknown registries or git sources.
 unknown-registry = "deny"
 unknown-git = "deny"

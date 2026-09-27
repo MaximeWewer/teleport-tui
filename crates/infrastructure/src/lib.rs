@@ -1,4 +1,4 @@
-//! Infrastructure layer -adapters that implement the domain ports.
+//! Infrastructure layer - adapters that implement the domain ports.
 //!
 //! The only place that touches the outside world: subprocess exec
 //! ([`process`]), `tsh` JSON parsing + mapping ([`tsh`]), per-OS binary/path

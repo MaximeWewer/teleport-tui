@@ -46,7 +46,7 @@ pub enum DomainError {
     InvalidValue { field: &'static str },
     /// No valid Teleport session (not logged in).
     NotAuthenticated,
-    /// Certificate expired -re-login required.
+    /// Certificate expired - re-login required.
     CertExpired,
     /// A leaf cluster is unreachable.
     ClusterOffline { cluster: String },
