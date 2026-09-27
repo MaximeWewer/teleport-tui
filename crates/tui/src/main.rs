@@ -263,38 +263,24 @@ fn handle_key(terminal: &mut Tui, app: &mut App, key: KeyEvent) -> bool {
         // A one-off command finishes on its own - pause on its output (a keypress
         // returns) so a fast command's result isn't wiped by the TUI redraw.
         Outcome::RunCommand { args, label } => run_and_report(terminal, app, &args, &label, true),
-        // Proxy launches block (port wait / kubeconfig handshake) for up to
-        // several seconds - run them on a worker thread and handle completion in
-        // `drain_proxy_events`, so the UI never freezes.
         Outcome::OpenApp {
             name,
             cluster,
             port,
-        } => {
-            app.note_connecting(&format!("Connecting to app {name}…"));
-            let tx = app.proxy_sender();
-            let tsh = app.tsh.clone();
-            thread::spawn(move || {
-                let result = proxy::open_app(&tsh, &name, &cluster, port);
-                let _ = tx.send(app::ProxyEvent::AppReady {
-                    name: name.to_string(),
-                    kind: app::ProxyKind::App,
-                    result,
-                });
-            });
-        }
+        } => launch_in_background(app, &format!("Connecting to app {name}…"), move |tsh| {
+            app::ProxyEvent::AppReady {
+                result: proxy::open_app(tsh, &name, &cluster, port),
+                name: name.to_string(),
+                kind: app::ProxyKind::App,
+            }
+        }),
         Outcome::OpenDbProxy { name, cluster } => {
-            app.note_connecting(&format!("Starting db proxy for {name}…"));
-            let tx = app.proxy_sender();
-            let tsh = app.tsh.clone();
-            thread::spawn(move || {
+            let label = format!("Starting db proxy for {name}…");
+            launch_in_background(app, &label, move |tsh| app::ProxyEvent::AppReady {
                 // Random local port; the endpoint is shown in the overlay.
-                let result = proxy::open_db(&tsh, &name, &cluster, None);
-                let _ = tx.send(app::ProxyEvent::AppReady {
-                    name: name.to_string(),
-                    kind: app::ProxyKind::Db,
-                    result,
-                });
+                result: proxy::open_db(tsh, &name, &cluster, None),
+                name: name.to_string(),
+                kind: app::ProxyKind::Db,
             });
         }
         Outcome::OpenKube {
@@ -302,19 +288,13 @@ fn handle_key(terminal: &mut Tui, app: &mut App, key: KeyEvent) -> bool {
             cluster,
             user,
             tool,
-        } => {
-            app.note_connecting(&format!("Opening {tool} on {kube}…"));
-            let tx = app.proxy_sender();
-            let tsh = app.tsh.clone();
-            thread::spawn(move || {
-                let result = proxy::start_kube_proxy(&tsh, &kube, &cluster, user.as_ref());
-                let _ = tx.send(app::ProxyEvent::KubeReady {
-                    kube: kube.to_string(),
-                    tool,
-                    result,
-                });
-            });
-        }
+        } => launch_in_background(app, &format!("Opening {tool} on {kube}…"), move |tsh| {
+            app::ProxyEvent::KubeReady {
+                result: proxy::start_kube_proxy(tsh, &kube, &cluster, user.as_ref()),
+                kube: kube.to_string(),
+                tool,
+            }
+        }),
         Outcome::OpenForward {
             cluster,
             user,
@@ -322,20 +302,14 @@ fn handle_key(terminal: &mut Tui, app: &mut App, key: KeyEvent) -> bool {
             spec,
             label,
         } => {
-            app.note_connecting(&label);
-            let tx = app.proxy_sender();
-            let tsh = app.tsh.clone();
             let target = user
                 .as_ref()
                 .map_or_else(|| host.to_string(), |u| format!("{u}@{host}"));
-            thread::spawn(move || {
-                let result = proxy::start_ssh_forward(&tsh, &cluster, user.as_ref(), &host, &spec);
-                let _ = tx.send(app::ProxyEvent::ForwardReady {
-                    spec,
-                    target,
-                    cluster: cluster.to_string(),
-                    result,
-                });
+            launch_in_background(app, &label, move |tsh| app::ProxyEvent::ForwardReady {
+                result: proxy::start_ssh_forward(tsh, &cluster, user.as_ref(), &host, &spec),
+                spec,
+                target,
+                cluster: cluster.to_string(),
             });
         }
         Outcome::KubeExec {
@@ -349,6 +323,23 @@ fn handle_key(terminal: &mut Tui, app: &mut App, key: KeyEvent) -> bool {
         }
     }
     false
+}
+
+/// Show `label`, then run a proxy launch on a worker thread: launches block
+/// (port wait / kubeconfig handshake) for up to several seconds, so the UI must
+/// not wait on them. The resulting [`app::ProxyEvent`] is handled by the event
+/// loop once it lands (see [`App::drain_proxy_events`]).
+fn launch_in_background(
+    app: &mut App,
+    label: &str,
+    launch: impl FnOnce(&Path) -> app::ProxyEvent + Send + 'static,
+) {
+    app.note_connecting(label);
+    let tx = app.proxy_sender();
+    let tsh = app.tsh.clone();
+    thread::spawn(move || {
+        let _ = tx.send(launch(&tsh));
+    });
 }
 
 /// Replay a recording interruptibly (Esc/q returns to the TUI); surface a
