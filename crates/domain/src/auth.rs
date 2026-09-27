@@ -99,7 +99,7 @@ impl MfaMode {
 
     /// The `--mfa-mode` / config spelling.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Auto => "auto",
             Self::CrossPlatform => "cross-platform",

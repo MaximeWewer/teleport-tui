@@ -16,7 +16,7 @@ pub enum RequestState {
 
 impl RequestState {
     #[must_use]
-    pub fn from_code(code: i64) -> Self {
+    pub const fn from_code(code: i64) -> Self {
         match code {
             0 => Self::None,
             1 => Self::Pending,
@@ -28,7 +28,7 @@ impl RequestState {
     }
 
     #[must_use]
-    pub fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::None => "none",
             Self::Pending => "pending",

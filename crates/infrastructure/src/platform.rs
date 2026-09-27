@@ -7,13 +7,13 @@ use domain::error::DomainError;
 
 /// Binary name for the current OS.
 #[must_use]
-pub fn tsh_binary_name() -> &'static str {
+pub const fn tsh_binary_name() -> &'static str {
     if cfg!(windows) { "tsh.exe" } else { "tsh" }
 }
 
 /// Admin CLI binary name for the current OS.
 #[must_use]
-pub fn tctl_binary_name() -> &'static str {
+pub const fn tctl_binary_name() -> &'static str {
     if cfg!(windows) { "tctl.exe" } else { "tctl" }
 }
 
@@ -75,7 +75,7 @@ fn find_in_path(path: &std::ffi::OsStr, name: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-fn known_install_dirs() -> &'static [&'static str] {
+const fn known_install_dirs() -> &'static [&'static str] {
     #[cfg(target_os = "macos")]
     {
         &["/opt/homebrew/bin", "/usr/local/bin"]

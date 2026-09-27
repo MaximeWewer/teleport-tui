@@ -18,7 +18,7 @@ pub enum Category {
 
 impl Category {
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Auth => "auth",
             Self::Network => "network",

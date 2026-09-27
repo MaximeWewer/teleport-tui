@@ -41,7 +41,7 @@ impl Capabilities {
 
     /// Permissive fallback: nothing was probed, so everything is "supported".
     #[must_use]
-    pub fn unknown() -> Self {
+    pub const fn unknown() -> Self {
         Self {
             commands: BTreeSet::new(),
             probed: false,
@@ -56,7 +56,7 @@ impl Capabilities {
 
     /// Whether a real probe produced this set (vs. the permissive fallback).
     #[must_use]
-    pub fn is_probed(&self) -> bool {
+    pub const fn is_probed(&self) -> bool {
         self.probed
     }
 }

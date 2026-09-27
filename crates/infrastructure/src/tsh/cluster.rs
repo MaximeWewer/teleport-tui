@@ -58,7 +58,7 @@ fn parse_kind(s: &str) -> Result<ClusterKind, DomainError> {
     }
 }
 
-fn parse_status(s: &str) -> ClusterStatus {
+const fn parse_status(s: &str) -> ClusterStatus {
     if s.eq_ignore_ascii_case("online") {
         ClusterStatus::Online
     } else {

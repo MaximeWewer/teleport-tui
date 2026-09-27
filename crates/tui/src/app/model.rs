@@ -69,7 +69,7 @@ impl Tab {
     pub(crate) const AUDIT: [Self; 1] = [Self::Recordings];
 
     #[must_use]
-    pub(crate) fn title(self) -> &'static str {
+    pub(crate) const fn title(self) -> &'static str {
         match self {
             Self::Ssh => "SSH",
             Self::Kube => "Kubernetes",
@@ -91,13 +91,13 @@ impl Tab {
     /// **and Recordings** - `tsh recordings ls` has no cluster flag either, so a
     /// leaf's recordings need a profile switch, exactly like the admin tabs.
     #[must_use]
-    pub(crate) fn serial_aggregation(self) -> bool {
+    pub(crate) const fn serial_aggregation(self) -> bool {
         self.is_admin() || matches!(self, Self::Recordings)
     }
 
     /// Admin tabs are root-scoped via `tctl`, not tied to the selected cluster.
     #[must_use]
-    pub(crate) fn is_admin(self) -> bool {
+    pub(crate) const fn is_admin(self) -> bool {
         matches!(
             self,
             Self::Users | Self::Roles | Self::Tokens | Self::Bots | Self::Inventory
@@ -511,7 +511,7 @@ pub(crate) struct AggRow {
 
 impl AggRow {
     /// A stand-in for a cluster (error / not logged in), not a real resource.
-    pub(crate) fn is_placeholder(&self) -> bool {
+    pub(crate) const fn is_placeholder(&self) -> bool {
         self.login_required || self.error
     }
 

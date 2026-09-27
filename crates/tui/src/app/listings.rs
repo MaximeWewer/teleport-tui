@@ -144,16 +144,16 @@ impl<T> PickList<T> {
         &self.items
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub(crate) const fn len(&self) -> usize {
         self.items.len()
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
     /// The selected row (0 when empty; see [`PickList::selected`]).
-    pub(crate) fn selected_index(&self) -> usize {
+    pub(crate) const fn selected_index(&self) -> usize {
         self.sel
     }
 

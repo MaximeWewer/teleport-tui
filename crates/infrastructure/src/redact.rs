@@ -65,13 +65,13 @@ fn looks_like_secret(word: &str) -> bool {
 }
 
 /// Characters a bare token can be made of (base64 and hex alphabets).
-fn is_token_char(c: char) -> bool {
+const fn is_token_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+' | '/' | '=')
 }
 
 /// Characters of one URL path segment / query value / dotted label: the token
 /// alphabet minus the `/` and `=` separators.
-fn is_segment_char(c: char) -> bool {
+const fn is_segment_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '+')
 }
 

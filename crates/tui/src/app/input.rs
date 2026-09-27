@@ -43,7 +43,7 @@ impl App {
     }
 
     /// Whether the current mode edits a text field (so a paste should land in it).
-    fn accepts_text_input(&self) -> bool {
+    const fn accepts_text_input(&self) -> bool {
         matches!(
             self.mode,
             Mode::Search

@@ -139,7 +139,7 @@ fn cycle_choice<T: Clone + PartialEq>(
 
 /// Advance a wrapping cursor (form field, dropdown option) by ±1 within
 /// `[0, len)`. Shared by every form so the modular arithmetic lives in one spot.
-fn wrap_step(idx: usize, len: usize, forward: bool) -> usize {
+const fn wrap_step(idx: usize, len: usize, forward: bool) -> usize {
     if len == 0 {
         return 0;
     }
@@ -184,7 +184,7 @@ impl SettingsForm {
     }
 
     /// True when the focused row only accepts digits (the refresh interval).
-    pub(crate) fn numeric_field(&self) -> bool {
+    pub(crate) const fn numeric_field(&self) -> bool {
         self.field == 7
     }
 

@@ -35,7 +35,7 @@ impl App {
 
     /// True when the active view is the all-clusters aggregate (every tab
     /// aggregates in this mode).
-    pub(crate) fn aggregating(&self) -> bool {
+    pub(crate) const fn aggregating(&self) -> bool {
         self.agg.enabled
     }
 
