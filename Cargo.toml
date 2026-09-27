@@ -46,6 +46,7 @@ print_stdout = "deny"
 print_stderr = "deny"
 indexing_slicing = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
 
 [profile.release]
 strip = true
