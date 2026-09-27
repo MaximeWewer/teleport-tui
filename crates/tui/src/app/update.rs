@@ -42,97 +42,22 @@ impl App {
 
     pub(super) fn apply(&mut self, seq: u64, result: JobResult) {
         match result {
-            JobResult::Clusters(Ok(topo)) => {
-                // Only drop the aggregate caches when the *online cluster set*
-                // actually changed. A routine refresh (notably the one after a
-                // leaf login) leaves them intact, so we don't re-fan every tab
-                // across every cluster - only the current tab, whose cache was
-                // dropped on purpose (submit_login), re-fans to pick up the leaf.
-                let online = |t: &ClusterTopology| {
-                    let mut v: Vec<String> = t
-                        .all()
-                        .iter()
-                        .filter(|c| c.is_online())
-                        .map(|c| c.name.to_string())
-                        .collect();
-                    v.sort();
-                    v
-                };
-                let changed = self
-                    .topology
-                    .as_ref()
-                    .is_none_or(|old| online(old) != online(&topo));
-                self.topology = Some(topo);
-                if changed {
-                    self.agg.cache.clear();
-                }
-                self.reload_active();
-                // Warm every other tab in the background so switches are instant.
-                self.prefetch_all();
-            }
-            JobResult::Status(Ok(profile)) => {
-                // No active session (logout / expiry): wipe every listing so no
-                // stale resource stays on screen.
-                if profile.is_none() {
-                    self.clear_session();
-                }
-                self.profile = profile;
-            }
-            JobResult::Token(Ok(token)) => {
-                // Display once; the token is held in zeroizing memory, never logged.
-                self.token_view = Some(token.into());
-                self.mode = Mode::ShowToken;
-                self.status = Some("token generated".to_owned());
-            }
-            JobResult::Clusters(Err(e)) | JobResult::Status(Err(e)) | JobResult::Token(Err(e)) => {
-                self.report(&e);
-            }
+            JobResult::Clusters(r) => self.ok_or_report(r, Self::apply_topology),
+            JobResult::Status(r) => self.ok_or_report(r, Self::apply_status),
+            JobResult::Token(r) => self.ok_or_report(r, Self::show_token),
+            JobResult::TokenRemoved(r) => self.ok_or_report(r, |app, ()| {
+                app.status = Some("token removed".to_owned());
+                // Refetch so the removed token disappears from the list.
+                app.invalidate_tab(Tab::Tokens);
+            }),
+            JobResult::Mfa(r) => self.ok_or_report(r, Self::show_mfa),
+            JobResult::Sessions(r) => self.ok_or_report(r, Self::show_sessions),
+            JobResult::Invite(r) => self.ok_or_report(r, Self::show_invite),
             JobResult::AdminAllowed(ok) => self.apply_admin_allowed(ok),
             JobResult::AdminProbeFailed(e) => {
                 self.report(&e);
                 self.apply_admin_allowed(false);
             }
-            JobResult::TokenRemoved(result) => match result {
-                Ok(()) => {
-                    self.status = Some("token removed".to_owned());
-                    // Refetch so the removed token disappears from the list.
-                    self.cache_key.remove(&Tab::Tokens);
-                    if self.tab == Tab::Tokens {
-                        self.reload_active();
-                    }
-                }
-                Err(e) => self.report(&e),
-            },
-            JobResult::Mfa(result) => match result {
-                Ok(devices) => {
-                    self.mfa_devices.set(devices);
-                    self.status = Some(format!("{} MFA device(s)", self.mfa_devices.len()));
-                    self.mode = Mode::ShowMfa;
-                }
-                Err(e) => self.report(&e),
-            },
-            JobResult::Sessions(result) => match result {
-                Ok(sessions) => {
-                    self.sessions.set(sessions);
-                    self.status = Some(format!("{} active session(s)", self.sessions.len()));
-                    self.mode = Mode::ShowSessions;
-                }
-                Err(e) => self.report(&e),
-            },
-            JobResult::Invite(result) => match result {
-                Ok(link) => {
-                    // Show the one-time URL; it is held zeroized and never logged.
-                    self.status = Some(format!("setup URL ready for {}", link.user));
-                    self.invite_view = Some(link.into());
-                    self.mode = Mode::ShowInvite;
-                    // A freshly added user won't be in the cached list → refresh.
-                    self.cache_key.remove(&Tab::Users);
-                    if self.tab == Tab::Users {
-                        self.reload_active();
-                    }
-                }
-                Err(e) => self.report(&e),
-            },
             JobResult::Aggregate { tab, cluster, rows } => {
                 self.apply_agg_result(seq, tab, &cluster, rows);
             }
@@ -140,8 +65,95 @@ impl App {
                 self.apply_agg_cluster(seq, tab, &cluster, rows, true);
             }
             JobResult::RestoreFailed { root, error } => self.report_restore_failed(&root, &error),
-            other => self.apply_tab(seq, other),
+            JobResult::List { tab, result } => self.apply_tab(seq, tab, result),
         }
+    }
+
+    /// Hand an `Ok` value to `on_ok`; report an `Err`.
+    fn ok_or_report<T>(
+        &mut self,
+        result: Result<T, DomainError>,
+        on_ok: impl FnOnce(&mut Self, T),
+    ) {
+        match result {
+            Ok(value) => on_ok(self, value),
+            Err(e) => self.report(&e),
+        }
+    }
+
+    /// Drop `tab`'s cached listing (it changed server-side) and reload it if it
+    /// is on screen; otherwise it is refetched on the next visit.
+    fn invalidate_tab(&mut self, tab: Tab) {
+        self.cache_key.remove(&tab);
+        if self.tab == tab {
+            self.reload_active();
+        }
+    }
+
+    fn apply_topology(&mut self, topo: ClusterTopology) {
+        // Only drop the aggregate caches when the *online cluster set*
+        // actually changed. A routine refresh (notably the one after a
+        // leaf login) leaves them intact, so we don't re-fan every tab
+        // across every cluster - only the current tab, whose cache was
+        // dropped on purpose (submit_login), re-fans to pick up the leaf.
+        let online = |t: &ClusterTopology| {
+            let mut v: Vec<String> = t
+                .all()
+                .iter()
+                .filter(|c| c.is_online())
+                .map(|c| c.name.to_string())
+                .collect();
+            v.sort();
+            v
+        };
+        let changed = self
+            .topology
+            .as_ref()
+            .is_none_or(|old| online(old) != online(&topo));
+        self.topology = Some(topo);
+        if changed {
+            self.agg.cache.clear();
+        }
+        self.reload_active();
+        // Warm every other tab in the background so switches are instant.
+        self.prefetch_all();
+    }
+
+    fn apply_status(&mut self, profile: Option<Profile>) {
+        // No active session (logout / expiry): wipe every listing so no
+        // stale resource stays on screen.
+        if profile.is_none() {
+            self.clear_session();
+        }
+        self.profile = profile;
+    }
+
+    fn show_token(&mut self, token: GeneratedToken) {
+        // Display once; the token is held in zeroizing memory, never logged.
+        self.token_view = Some(token.into());
+        self.mode = Mode::ShowToken;
+        self.status = Some("token generated".to_owned());
+    }
+
+    fn show_mfa(&mut self, devices: Vec<MfaDevice>) {
+        self.mfa_devices.set(devices);
+        self.status = Some(format!("{} MFA device(s)", self.mfa_devices.len()));
+        self.mode = Mode::ShowMfa;
+    }
+
+    fn show_sessions(&mut self, sessions: Vec<ActiveSession>) {
+        self.sessions.set(sessions);
+        self.status = Some(format!("{} active session(s)", self.sessions.len()));
+        self.mode = Mode::ShowSessions;
+    }
+
+    fn show_invite(&mut self, link: InviteLink) {
+        // Show the one-time URL; it is held zeroized and never logged.
+        self.status = Some(format!("setup URL ready for {}", link.user));
+        self.invite_view = Some(link.into());
+        self.mode = Mode::ShowInvite;
+        // A freshly added user won't be in the cached list → refresh.
+        self.invalidate_tab(Tab::Users);
     }
 
     /// Log a failed root-profile restore and say which profile is stranded: every
@@ -233,31 +245,9 @@ impl App {
         });
     }
 
-    /// Store a tab-data result into its vec, returning which tab it belongs to
-    /// and the load outcome (row count or error). No UI side effects.
-    fn store_tab_result(&mut self, result: JobResult) -> (Tab, Result<usize, DomainError>) {
-        match result {
-            JobResult::List { tab, result } => (tab, result.map(|l| self.lists.store(l))),
-            JobResult::Clusters(_)
-            | JobResult::Status(_)
-            | JobResult::Token(_)
-            | JobResult::TokenRemoved(_)
-            | JobResult::Invite(_)
-            | JobResult::Mfa(_)
-            | JobResult::Sessions(_)
-            | JobResult::AdminAllowed(_)
-            | JobResult::AdminProbeFailed(_)
-            // These variants are routed directly in `apply`; reaching here would
-            // be a routing bug - degrade to a no-op load rather than panicking.
-            | JobResult::Aggregate { .. }
-            | JobResult::RestoreFailed { .. }
-            | JobResult::AggregateAdmin { .. } => (self.tab, Ok(0)),
-        }
-    }
-
     /// Apply a tab-data result. `seq >= PREFETCH_BASE` marks a background
     /// prefetch: it fills the tab's cache without disturbing the active view.
-    fn apply_tab(&mut self, seq: u64, result: JobResult) {
+    fn apply_tab(&mut self, seq: u64, tab: Tab, result: Result<Listing, DomainError>) {
         let prefetch = seq >= PREFETCH_BASE;
         if prefetch {
             if seq != self.prefetch_seq {
@@ -266,7 +256,7 @@ impl App {
         } else if seq != self.tab_req {
             return; // a newer active-tab request was issued; this result is stale.
         }
-        let (tab, outcome) = self.store_tab_result(result);
+        let outcome = result.map(|l| self.lists.store(l));
 
         if prefetch {
             // Background fill: cache the tab silently; the active view is untouched
