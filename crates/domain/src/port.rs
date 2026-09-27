@@ -9,6 +9,7 @@ use crate::cluster::{ClusterContext, ClusterTopology};
 use crate::error::{DomainError, ReportableError};
 use crate::mfa::MfaDevice;
 use crate::node::SshNode;
+use crate::preferences::Preferences;
 use crate::profile::Profile;
 use crate::recording::SessionRecording;
 use crate::request::AccessRequest;
@@ -40,6 +41,19 @@ impl LogLevel {
 pub trait ErrorLog: std::fmt::Debug + Send + Sync {
     /// Record `err`, raised in `layer`, for the run `run_id`.
     fn record(&self, layer: &str, level: LogLevel, err: &dyn ReportableError, run_id: &str);
+}
+
+/// Persists the user's [`Preferences`] (the config file in production).
+pub trait PreferencesStore: std::fmt::Debug + Send + Sync {
+    /// Save `prefs`, keeping whatever else the store holds that is not a
+    /// preference (e.g. binary path overrides).
+    ///
+    /// # Errors
+    /// Returns the I/O error when the store could not be written.
+    fn save(&self, prefs: &Preferences) -> std::io::Result<()>;
+
+    /// Where the preferences live, for the "saved" confirmation.
+    fn location(&self) -> String;
 }
 
 /// Probes which top-level commands the installed `tsh` supports, so the UI can

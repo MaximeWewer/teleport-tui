@@ -22,6 +22,7 @@ pub mod error;
 pub mod mfa;
 pub mod node;
 pub mod port;
+pub mod preferences;
 pub mod profile;
 pub mod recording;
 pub mod request;

@@ -42,7 +42,7 @@ use std::time::Duration;
 use domain::port::{AdminRepository, CapabilityProbe};
 use domain::value::{ClusterName, ResourceName};
 use infrastructure::capability::TshCapabilityProbe;
-use infrastructure::config::{Config, default_kube_tools};
+use infrastructure::config::{Config, ConfigFileStore, default_kube_tools};
 use infrastructure::logging::NdjsonLogger;
 use infrastructure::platform::{locate_tctl, locate_tsh};
 use infrastructure::process::SystemCommandRunner;
@@ -124,11 +124,11 @@ fn real_main() -> Result<(), String> {
         default_kube_user: config.kube_user.clone(),
         default_db_user: config.db_user.clone(),
         refresh_seconds: config.refresh_seconds,
-        config_path: infrastructure::platform::config_path(),
         // Probe the installed tsh once so the UI hides unsupported actions.
         capabilities: TshCapabilityProbe::new(SystemCommandRunner, tsh.clone()).probe(),
     };
-    let mut application = App::new(repos, logger, run_id(), tsh, settings, false);
+    let store = Box::new(ConfigFileStore::at_default_path());
+    let mut application = App::new(repos, logger, store, run_id(), tsh, settings, false);
     application.warn_startup(&warnings);
     application.bootstrap();
 

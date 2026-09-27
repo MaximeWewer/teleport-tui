@@ -7,6 +7,7 @@ use domain::value::{ClusterName, Hostname, ResourceName, RoleList, TokenTypes};
 fn cn(s: &str) -> ClusterName {
     ClusterName::try_from(s).unwrap()
 }
+use infrastructure::config::ConfigFileStore;
 use infrastructure::logging::NdjsonLogger;
 use ratatui::crossterm::event::KeyEvent;
 
@@ -352,6 +353,7 @@ fn test_app_with(admin: Box<dyn AdminRepository>, auth: Box<dyn AuthGateway>) ->
     let mut app = App::new(
         repos,
         logger,
+        Box::new(NullStore),
         "test".to_owned(),
         PathBuf::from("tsh"),
         settings,
@@ -359,6 +361,18 @@ fn test_app_with(admin: Box<dyn AdminRepository>, auth: Box<dyn AuthGateway>) ->
     );
     app.bootstrap();
     app
+}
+
+/// Preferences store that accepts and forgets every save.
+#[derive(Debug)]
+struct NullStore;
+impl PreferencesStore for NullStore {
+    fn save(&self, _prefs: &Preferences) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn location(&self) -> String {
+        "nowhere".to_owned()
+    }
 }
 
 fn press(c: char) -> KeyEvent {
@@ -555,6 +569,7 @@ fn async_app() -> App {
     App::new(
         repos,
         logger,
+        Box::new(NullStore),
         "t".to_owned(),
         PathBuf::from("tsh"),
         Settings {
@@ -1046,6 +1061,7 @@ fn switching_cluster_invalidates_cache_and_refetches() {
     let mut app = App::new(
         repos,
         logger,
+        Box::new(NullStore),
         "t".to_owned(),
         PathBuf::from("tsh"),
         Settings {
@@ -1099,6 +1115,7 @@ fn entering_all_clusters_reuses_active_cluster_data() {
     let mut app = App::new(
         repos,
         logger,
+        Box::new(NullStore),
         "t".to_owned(),
         PathBuf::from("tsh"),
         Settings {
@@ -1151,6 +1168,7 @@ fn switching_tabs_uses_cache_and_r_forces_refetch() {
     let mut app = App::new(
         repos,
         logger,
+        Box::new(NullStore),
         "t".to_owned(),
         PathBuf::from("tsh"),
         Settings {
@@ -1933,7 +1951,7 @@ fn settings_edit_persists_to_file() {
     let path = dir.join("config.toml");
     let _ = std::fs::remove_file(&path);
     let mut app = test_app();
-    app.config_path = path.clone();
+    app.prefs_store = Box::new(ConfigFileStore::new(path.clone()));
     app.on_key(press('p'));
     assert_eq!(app.mode, Mode::Settings);
     // Type an SSH default login on the first (focused) row.
@@ -1944,7 +1962,7 @@ fn settings_edit_persists_to_file() {
     assert_eq!(app.mode, Mode::Normal);
     assert_eq!(app.default_login.as_deref(), Some("ubuntu"));
     // The file was written and reloads with the same value.
-    let reloaded = InfraConfig::load(&path);
+    let reloaded = infrastructure::config::Config::load(&path);
     assert_eq!(reloaded.default_login.as_deref(), Some("ubuntu"));
     let _ = std::fs::remove_dir_all(&dir);
 }

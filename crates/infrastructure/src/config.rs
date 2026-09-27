@@ -7,6 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use domain::auth::{AuthMethod, MfaMode};
+use domain::port::PreferencesStore;
+use domain::preferences::Preferences;
 
 use crate::platform;
 
@@ -218,6 +220,70 @@ impl Config {
     }
 }
 
+impl Config {
+    /// The user-editable subset (the Settings screen).
+    #[must_use]
+    pub fn preferences(&self) -> Preferences {
+        Preferences {
+            proxy: self.proxy.clone(),
+            user: self.user.clone(),
+            auth: self.auth.clone(),
+            mfa: self.mfa,
+            default_login: self.default_login.clone(),
+            kube_user: self.kube_user.clone(),
+            db_user: self.db_user.clone(),
+            refresh_seconds: self.refresh_seconds,
+            kube_tools: self.kube_tools.clone(),
+        }
+    }
+
+    /// Overwrite the user-editable subset, keeping the other keys (binary paths).
+    pub fn set_preferences(&mut self, prefs: &Preferences) {
+        self.proxy.clone_from(&prefs.proxy);
+        self.user.clone_from(&prefs.user);
+        self.auth.clone_from(&prefs.auth);
+        self.mfa = prefs.mfa;
+        self.default_login.clone_from(&prefs.default_login);
+        self.kube_user.clone_from(&prefs.kube_user);
+        self.db_user.clone_from(&prefs.db_user);
+        self.refresh_seconds = prefs.refresh_seconds;
+        self.kube_tools.clone_from(&prefs.kube_tools);
+    }
+}
+
+/// [`PreferencesStore`] backed by the `config.toml` at `path`. Each save
+/// re-reads the file first, so keys the Settings screen doesn't edit (e.g.
+/// `tsh_path`) survive.
+#[derive(Debug, Clone)]
+pub struct ConfigFileStore {
+    path: PathBuf,
+}
+
+impl ConfigFileStore {
+    #[must_use]
+    pub fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    /// The per-OS config path.
+    #[must_use]
+    pub fn at_default_path() -> Self {
+        Self::new(platform::config_path())
+    }
+}
+
+impl PreferencesStore for ConfigFileStore {
+    fn save(&self, prefs: &Preferences) -> std::io::Result<()> {
+        let mut cfg = Config::load(&self.path);
+        cfg.set_preferences(prefs);
+        cfg.save(&self.path)
+    }
+
+    fn location(&self) -> String {
+        self.path.display().to_string()
+    }
+}
+
 fn unquote(s: &str) -> &str {
     // Strip a matching pair of surrounding single/double quotes, index-free:
     // peel the first and last char and return the middle only when both are the
@@ -327,6 +393,24 @@ mod tests {
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(cfg.auth.as_ref().map(AuthMethod::as_str), Some("okta"));
         assert_eq!(cfg.mfa, Some(MfaMode::CrossPlatform));
+    }
+
+    #[test]
+    fn file_store_saves_preferences_and_keeps_other_keys() {
+        let dir = std::env::temp_dir().join(format!("ttui-store-{}", std::process::id()));
+        let path = dir.join("config.toml");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(&path, "tsh_path = \"/opt/tsh\"\nuser = \"old\"\n").unwrap();
+        let prefs = Preferences {
+            user: Some("alice".to_owned()),
+            mfa: Some(MfaMode::Otp),
+            ..Preferences::default()
+        };
+        ConfigFileStore::new(path.clone()).save(&prefs).unwrap();
+        let reloaded = Config::load(&path);
+        assert_eq!(reloaded.tsh_path, Some(PathBuf::from("/opt/tsh")));
+        assert_eq!(reloaded.preferences(), prefs);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

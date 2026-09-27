@@ -128,24 +128,24 @@ impl App {
         Outcome::Continue
     }
 
-    /// Write the live defaults back to `config.toml`, preserving keys we don't
-    /// edit (e.g. `tsh_path`) by re-reading the file first.
+    /// Write the live defaults back through the preferences store (which keeps
+    /// the keys this screen doesn't edit, e.g. `tsh_path`).
     fn persist_settings(&mut self) {
-        let mut cfg = InfraConfig::load(&self.config_path);
-        cfg.proxy.clone_from(&self.login_proxy);
-        cfg.user.clone_from(&self.login_user);
-        cfg.auth.clone_from(&self.login_auth);
-        cfg.mfa.clone_from(&self.login_mfa);
-        cfg.default_login.clone_from(&self.default_login);
-        cfg.kube_user.clone_from(&self.default_kube_user);
-        cfg.db_user.clone_from(&self.default_db_user);
-        cfg.refresh_seconds = self.refresh_seconds;
-        cfg.kube_tools.clone_from(&self.kube_tools);
-        if let Err(e) = cfg.save(&self.config_path) {
-            self.status = Some(format!("[CONFIG_SAVE_FAILED] {e}"));
-        } else {
-            self.status = Some(format!("settings saved → {}", self.config_path.display()));
-        }
+        let prefs = Preferences {
+            proxy: self.login_proxy.clone(),
+            user: self.login_user.clone(),
+            auth: self.login_auth.clone(),
+            mfa: self.login_mfa,
+            default_login: self.default_login.clone(),
+            kube_user: self.default_kube_user.clone(),
+            db_user: self.default_db_user.clone(),
+            refresh_seconds: self.refresh_seconds,
+            kube_tools: self.kube_tools.clone(),
+        };
+        self.status = Some(match self.prefs_store.save(&prefs) {
+            Ok(()) => format!("settings saved → {}", self.prefs_store.location()),
+            Err(e) => format!("[CONFIG_SAVE_FAILED] {e}"),
+        });
     }
 
     /// Build `tsh login` from the form and hand off to the terminal. `tsh`

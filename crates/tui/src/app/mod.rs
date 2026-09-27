@@ -24,9 +24,10 @@ use domain::mfa::MfaDevice;
 use domain::node::SshNode;
 use domain::port::{
     AdminRepository, AppRepository, AuthGateway, ClusterRepository, DatabaseRepository, ErrorLog,
-    KubeRepository, LogLevel, NodeRepository, RecordingRepository, RequestRepository,
-    SessionRepository,
+    KubeRepository, LogLevel, NodeRepository, PreferencesStore, RecordingRepository,
+    RequestRepository, SessionRepository,
 };
+use domain::preferences::Preferences;
 use domain::profile::Profile;
 use domain::recording::SessionRecording;
 use domain::request::{AccessRequest, RequestState};
@@ -37,7 +38,6 @@ use domain::value::{
     ClusterName, DeviceName, Hostname, Identifier, Login, RequestId, ResourceName, RoleList,
     SessionId, TokenTypes,
 };
-use infrastructure::config::Config as InfraConfig;
 use infrastructure::redact::redact_message;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::widgets::{ListState, TableState};
@@ -148,8 +148,9 @@ pub(crate) struct App {
     default_db_user: Option<String>,
     /// Auto-refresh interval (persisted; applied on next launch).
     refresh_seconds: Option<u64>,
-    /// Resolved `config.toml` path that the Settings screen writes back to.
-    config_path: PathBuf,
+    /// Where the Settings screen persists its edits (injected port; the
+    /// `config.toml` file in production).
+    prefs_store: Box<dyn PreferencesStore>,
     /// In-progress Settings (persisted defaults) editor.
     pub(crate) settings_form: SettingsForm,
     /// All-clusters aggregate view: when on, the active tab lists every cluster.
@@ -216,6 +217,7 @@ impl App {
     pub(crate) fn new(
         repos: Repositories,
         logger: Box<dyn ErrorLog>,
+        prefs_store: Box<dyn PreferencesStore>,
         run_id: String,
         tsh: PathBuf,
         settings: Settings,
@@ -232,7 +234,6 @@ impl App {
             default_kube_user,
             default_db_user,
             refresh_seconds,
-            config_path,
             capabilities,
         } = settings;
         Self {
@@ -291,7 +292,7 @@ impl App {
             default_kube_user,
             default_db_user,
             refresh_seconds,
-            config_path,
+            prefs_store,
             settings_form: SettingsForm::default(),
             aggregate: false,
             pending_root_restore: None,
