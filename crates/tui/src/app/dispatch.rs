@@ -9,6 +9,8 @@
 
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use std::collections::VecDeque;
+use std::sync::Condvar;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A unit of CLI work to run off the UI thread.
@@ -357,6 +359,108 @@ fn aggregate_rows(
     }
 }
 
+/// Which queue a pooled job goes to, and how it can go stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Lane {
+    /// The active tab's listing: runs first; dropped unrun if a newer tab
+    /// request was issued meanwhile (its result would be discarded anyway).
+    Tab,
+    /// Background warm-up of another tab: runs only when nothing else is
+    /// queued; dropped unrun if its batch was superseded (cluster change).
+    Prefetch,
+    /// Anything else (status, topology, actions, aggregate slices): runs first
+    /// and is never dropped.
+    Other,
+}
+
+/// One queued pool job.
+#[derive(Debug)]
+pub(super) struct Work {
+    pub(super) seq: u64,
+    pub(super) job: Job,
+    pub(super) lane: Lane,
+}
+
+#[derive(Debug, Default)]
+struct Queues {
+    /// Jobs the user is waiting on (active tab, status, actions, aggregate).
+    urgent: VecDeque<Work>,
+    /// Prefetch jobs, only dequeued when nothing urgent is queued.
+    background: VecDeque<Work>,
+    /// Set when the dispatcher is dropped: workers exit.
+    closed: bool,
+}
+
+/// The worker pool's two-level FIFO: urgent jobs always dequeue before
+/// background prefetches, so the tab the user is looking at never waits behind
+/// a batch warming the others.
+#[derive(Debug, Default)]
+pub(super) struct WorkQueue {
+    queues: Mutex<Queues>,
+    ready: Condvar,
+}
+
+impl WorkQueue {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Queues> {
+        self.queues
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(super) fn push(&self, work: Work) {
+        let mut q = self.lock();
+        if work.lane == Lane::Prefetch {
+            q.background.push_back(work);
+        } else {
+            q.urgent.push_back(work);
+        }
+        drop(q);
+        self.ready.notify_one();
+    }
+
+    /// Block until a job is queued (urgent first) or the queue is closed (`None`).
+    pub(super) fn pop(&self) -> Option<Work> {
+        let mut q = self.lock();
+        loop {
+            if q.closed {
+                return None;
+            }
+            if let Some(work) = q.urgent.pop_front().or_else(|| q.background.pop_front()) {
+                return Some(work);
+            }
+            q = self
+                .ready
+                .wait(q)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+
+    pub(super) fn close(&self) {
+        self.lock().closed = true;
+        self.ready.notify_all();
+    }
+}
+
+/// The latest generation of each droppable [`Lane`], shared with the workers.
+#[derive(Debug, Default)]
+pub(super) struct Generations {
+    /// The latest active-tab request (`App::tab_req`).
+    pub(super) tab: AtomicU64,
+    /// The current prefetch batch (`App::prefetch_seq`).
+    pub(super) prefetch: AtomicU64,
+}
+
+impl Generations {
+    /// Whether a job queued at `seq` on `lane` was superseded before it ran.
+    pub(super) fn is_stale(&self, lane: Lane, seq: u64) -> bool {
+        match lane {
+            Lane::Tab => self.tab.load(Ordering::Acquire) != seq,
+            Lane::Prefetch => self.prefetch.load(Ordering::Acquire) != seq,
+            Lane::Other => false,
+        }
+    }
+}
+
 /// The concurrency seam. Owns the repository ports and the background job/proxy
 /// channels, and knows how to run a [`Job`] - inline in `synchronous` mode (for
 /// deterministic tests) or on a worker thread otherwise. Pulling this out keeps
@@ -375,16 +479,16 @@ pub(super) struct Dispatcher {
     /// shared profile; without this lock two concurrent worker threads could flip
     /// it mid-listing and make a `tctl` read return another cluster's data.
     profile_lock: Arc<Mutex<()>>,
-    /// The latest active-tab request (`App::tab_req`), so a queued scoped admin
-    /// job can tell it was superseded before doing any work
-    /// ([`run_scoped_if_latest`]).
-    tab_latest: Arc<AtomicU64>,
+    /// The latest active-tab request and prefetch batch, so a queued job can
+    /// tell it was superseded before doing any work (pool jobs, and scoped admin
+    /// jobs via [`run_scoped_if_latest`]).
+    generations: Arc<Generations>,
     /// Bounded worker pool for [`Dispatcher::spawn_job`] (async mode only). A wide
     /// fan-out (one job per tab per online cluster) enqueues here instead of
     /// spawning an unbounded number of threads / concurrent `tsh` subprocesses.
     /// `None` in synchronous mode (jobs run inline). The serial fan-outs
     /// (`spawn_admin_stream`, `spawn_after_action`) keep dedicated threads.
-    work_tx: Option<Sender<(u64, Job)>>,
+    pool: Option<Arc<WorkQueue>>,
     /// Run jobs inline instead of off-thread (used by tests for determinism).
     synchronous: bool,
 }
@@ -396,7 +500,8 @@ impl Dispatcher {
         let repos = Arc::new(repos);
         // Async mode drains jobs through a bounded worker pool; sync mode runs
         // them inline (so no pool is needed).
-        let work_tx = (!synchronous).then(|| Self::start_pool(&repos, &job_tx));
+        let generations = Arc::new(Generations::default());
+        let pool = (!synchronous).then(|| Self::start_pool(&repos, &job_tx, &generations));
         Self {
             repos,
             job_tx,
@@ -404,66 +509,72 @@ impl Dispatcher {
             proxy_tx,
             proxy_rx,
             profile_lock: Arc::new(Mutex::new(())),
-            tab_latest: Arc::new(AtomicU64::new(0)),
-            work_tx,
+            generations,
+            pool,
             synchronous,
         }
     }
 
     /// Start a small fixed pool of worker threads that pull queued jobs off a
-    /// shared channel and send each result back on `job_tx`. Bounding the worker
-    /// count caps how many `tsh`/`tctl` subprocesses one fan-out can run at once
-    /// (a topology switch would otherwise spawn a thread per tab per cluster). The
-    /// receiver lock is held only to dequeue - never across `run_job` - so the
-    /// workers still execute jobs concurrently, up to the pool size.
+    /// shared [`WorkQueue`] and send each result back on `job_tx`. Bounding the
+    /// worker count caps how many `tsh`/`tctl` subprocesses one fan-out can run at
+    /// once (a topology switch would otherwise spawn a thread per tab per
+    /// cluster). The queue lock is held only to dequeue - never across `run_job` -
+    /// so the workers still execute jobs concurrently, up to the pool size. A job
+    /// superseded while it queued is dropped unrun (its result would be discarded
+    /// anyway), so tab flicks or a cluster switch don't keep the pool busy with
+    /// dead work.
     fn start_pool(
         repos: &Arc<Repositories>,
         job_tx: &Sender<(u64, JobResult)>,
-    ) -> Sender<(u64, Job)> {
-        let (work_tx, work_rx) = mpsc::channel::<(u64, Job)>();
-        let work_rx = Arc::new(Mutex::new(work_rx));
+        generations: &Arc<Generations>,
+    ) -> Arc<WorkQueue> {
+        let queue = Arc::new(WorkQueue::default());
         let workers = std::thread::available_parallelism().map_or(4, |n| n.get().clamp(2, 8));
         for _ in 0..workers {
-            let rx = Arc::clone(&work_rx);
+            let queue = Arc::clone(&queue);
             let repos = Arc::clone(repos);
             let job_tx = job_tx.clone();
+            let generations = Arc::clone(generations);
             std::thread::spawn(move || {
-                loop {
-                    // Dequeue under the lock, then drop it before running the job
-                    // so another worker can pull the next job in parallel.
-                    let next = {
-                        let guard = rx.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                        guard.recv()
-                    };
-                    let Ok((seq, job)) = next else {
-                        break; // every sender dropped → the pool is shutting down
-                    };
+                // `None` once the dispatcher is dropped → the pool shuts down.
+                while let Some(Work { seq, job, lane }) = queue.pop() {
+                    if generations.is_stale(lane, seq) {
+                        continue;
+                    }
                     let _ = job_tx.send((seq, run_job(&repos, job)));
                 }
             });
         }
-        work_tx
+        queue
     }
 
     /// Run a job. In synchronous mode the result is returned for the caller to
     /// apply immediately (deterministic tests); otherwise it runs on a worker
     /// thread and lands later via [`Dispatcher::drain_jobs`]. So a `Some` return
     /// means "apply this now", `None` means "it'll arrive on the channel".
-    pub(super) fn spawn_job(&self, seq: u64, job: Job) -> Option<(u64, JobResult)> {
+    /// `lane` picks the queue and says how the job can go stale (see [`Lane`]).
+    pub(super) fn spawn_job(&self, seq: u64, job: Job, lane: Lane) -> Option<(u64, JobResult)> {
         if self.synchronous {
             return Some((seq, run_job(&self.repos, job)));
         }
         // Enqueue on the bounded pool instead of spawning a thread per job.
-        if let Some(tx) = &self.work_tx {
-            let _ = tx.send((seq, job));
+        if let Some(pool) = &self.pool {
+            pool.push(Work { seq, job, lane });
         }
         None
     }
 
-    /// Record `seq` as the latest active-tab request; older queued scoped admin
-    /// jobs then skip their work.
+    /// Record `seq` as the latest active-tab request; older queued tab jobs and
+    /// scoped admin jobs then skip their work.
     pub(super) fn note_tab_request(&self, seq: u64) {
-        self.tab_latest.store(seq, Ordering::Release);
+        self.generations.tab.store(seq, Ordering::Release);
+    }
+
+    /// Record `seq` as the current prefetch batch; queued jobs of older batches
+    /// then skip their work.
+    pub(super) fn note_prefetch_batch(&self, seq: u64) {
+        self.generations.prefetch.store(seq, Ordering::Release);
     }
 
     /// Run a single-cluster admin (`tctl`) job against `cluster` by re-keying the
@@ -488,15 +599,22 @@ impl Dispatcher {
         root: String,
     ) -> Vec<(u64, JobResult)> {
         if self.synchronous {
-            return run_scoped_if_latest(&self.repos, &self.tab_latest, seq, job, &cluster, &root)
-                .into_iter()
-                .map(|r| (seq, r))
-                .collect();
+            return run_scoped_if_latest(
+                &self.repos,
+                &self.generations.tab,
+                seq,
+                job,
+                &cluster,
+                &root,
+            )
+            .into_iter()
+            .map(|r| (seq, r))
+            .collect();
         }
         let repos = Arc::clone(&self.repos);
         let tx = self.job_tx.clone();
         let profile_lock = Arc::clone(&self.profile_lock);
-        let latest = Arc::clone(&self.tab_latest);
+        let generations = Arc::clone(&self.generations);
         std::thread::spawn(move || {
             // Switch, read and restore root all inside the critical section (see
             // spawn_admin_stream). A job superseded while it waited for the lock
@@ -505,7 +623,7 @@ impl Dispatcher {
                 let _guard = profile_lock
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                run_scoped_if_latest(&repos, &latest, seq, job, &cluster, &root)
+                run_scoped_if_latest(&repos, &generations.tab, seq, job, &cluster, &root)
             };
             for result in results {
                 let _ = tx.send((seq, result));
@@ -647,5 +765,14 @@ impl Dispatcher {
             out.push(ev);
         }
         out
+    }
+}
+
+impl Drop for Dispatcher {
+    /// Stop the pool's workers (they would otherwise block on the queue forever).
+    fn drop(&mut self) {
+        if let Some(pool) = &self.pool {
+            pool.close();
+        }
     }
 }

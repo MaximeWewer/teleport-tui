@@ -9,14 +9,14 @@ use super::*;
 impl App {
     /// Dispatch an auxiliary (ungated) job: status / clusters.
     pub(super) fn dispatch_aux(&mut self, job: Job) {
-        self.send(0, job);
+        self.send(0, job, Lane::Other);
     }
 
     /// Dispatch the active-tab data job, marking the tab as loading and tagging
     /// the request so stale results (from a superseded request) are discarded.
     fn dispatch_tab(&mut self, job: Job) {
         let seq = self.begin_tab_request();
-        self.send(seq, job);
+        self.send(seq, job, Lane::Tab);
     }
 
     /// Start a new active-tab request: bump (and publish to the dispatcher) the
@@ -32,10 +32,10 @@ impl App {
         self.tab_req
     }
 
-    fn send(&mut self, seq: u64, job: Job) {
+    fn send(&mut self, seq: u64, job: Job, lane: Lane) {
         // In synchronous mode the result comes back immediately; apply it here so
         // tests observe state without a tick. Otherwise it lands via `tick`.
-        if let Some((seq, result)) = self.dispatcher.spawn_job(seq, job) {
+        if let Some((seq, result)) = self.dispatcher.spawn_job(seq, job, lane) {
             self.apply(seq, result);
         }
     }
@@ -345,6 +345,7 @@ impl App {
             self.prefetch_cluster = cluster;
         }
         let seq = self.prefetch_seq;
+        self.dispatcher.note_prefetch_batch(seq);
         let ctx = self.topology.as_ref().map(|t| t.selected().clone());
         for tab in Tab::ALL {
             if tab == self.tab {
@@ -379,7 +380,7 @@ impl App {
                 Tab::Inventory => Some(Job::Instances),
             };
             if let Some(job) = job {
-                self.send(seq, job);
+                self.send(seq, job, Lane::Prefetch);
             }
         }
     }
@@ -572,7 +573,7 @@ impl App {
         let seq = self.agg_seq;
         let tab = self.tab;
         for ctx in missing {
-            self.send(seq, Job::Aggregate { tab, ctx });
+            self.send(seq, Job::Aggregate { tab, ctx }, Lane::Other);
         }
     }
 

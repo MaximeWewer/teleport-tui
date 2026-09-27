@@ -2077,3 +2077,42 @@ fn forward_bound_on_all_interfaces_warns_in_status() {
             .contains("WARNING")
     );
 }
+
+// The pool dequeues the active tab's job (and other urgent work) before any
+// queued prefetch, FIFO within each level.
+#[test]
+fn work_queue_runs_urgent_jobs_before_prefetches() {
+    use dispatch::{Work, WorkQueue};
+    let queue = WorkQueue::default();
+    let work = |seq, lane| Work {
+        seq,
+        job: Job::Status,
+        lane,
+    };
+    queue.push(work(1, Lane::Prefetch));
+    queue.push(work(2, Lane::Prefetch));
+    queue.push(work(3, Lane::Tab));
+    queue.push(work(4, Lane::Other));
+    let order: Vec<u64> = (0..4).filter_map(|_| queue.pop()).map(|w| w.seq).collect();
+    assert_eq!(order, vec![3, 4, 1, 2]);
+    queue.close();
+    assert!(queue.pop().is_none(), "a closed queue releases its workers");
+}
+
+// A queued tab job or prefetch is stale once a newer request / batch was noted;
+// other work never is.
+#[test]
+fn superseded_pool_jobs_are_stale() {
+    use dispatch::Generations;
+    use std::sync::atomic::Ordering;
+    let generations = Generations::default();
+    generations.tab.store(5, Ordering::Release);
+    generations
+        .prefetch
+        .store(PREFETCH_BASE + 2, Ordering::Release);
+    assert!(!generations.is_stale(Lane::Tab, 5));
+    assert!(generations.is_stale(Lane::Tab, 4));
+    assert!(!generations.is_stale(Lane::Prefetch, PREFETCH_BASE + 2));
+    assert!(generations.is_stale(Lane::Prefetch, PREFETCH_BASE + 1));
+    assert!(!generations.is_stale(Lane::Other, 0));
+}
