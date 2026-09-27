@@ -13,7 +13,7 @@ use super::centered;
 use super::chrome::cluster_label;
 use crate::app::{App, Mode, Tab};
 
-pub(super) fn render_tool_picker(frame: &mut Frame, app: &mut App) {
+pub(super) fn render_tool_picker(frame: &mut Frame, app: &App) {
     let items: Vec<ListItem> = app
         .tool_choices
         .items()
@@ -34,7 +34,7 @@ pub(super) fn render_tool_picker(frame: &mut Frame, app: &mut App) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-pub(super) fn render_user_picker(frame: &mut Frame, app: &mut App) {
+pub(super) fn render_user_picker(frame: &mut Frame, app: &App) {
     let items: Vec<ListItem> = app
         .user_choices
         .items()

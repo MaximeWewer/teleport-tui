@@ -341,7 +341,7 @@ fn parse_invite(user: &str, stdout: &str) -> Result<InviteLink, DomainError> {
             // wiped-on-drop holder.
             url: SecretString::new(u.to_owned()),
         })
-        .ok_or(DomainError::Parse {
+        .ok_or_else(|| DomainError::Parse {
             detail: "could not find setup URL in output".to_owned(),
         })
 }

@@ -721,7 +721,7 @@ fn scoped_admin_does_not_list_when_the_cluster_switch_fails() {
 fn scoped_admin_surfaces_a_failed_root_restore() {
     let listed = std::sync::Arc::new(AtomicUsize::new(0));
     let mut app = test_app_with(
-        Box::new(CountingAdmin(listed.clone())),
+        Box::new(CountingAdmin(listed)),
         Box::new(failing_select_auth("root.example")),
     );
     app.topology

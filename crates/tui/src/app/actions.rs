@@ -175,10 +175,9 @@ impl App {
         // login-required placeholder. Other clusters keep their cache.
         if let Some(root) = self.relogin_root.take() {
             self.pending_root_restore = Some(root);
-            let proxy = f.proxy.clone();
             self.agg
                 .cache
-                .retain(|(_, cluster), _| cluster.as_str() != proxy);
+                .retain(|(_, cluster), _| cluster.as_str() != f.proxy);
         }
         let args = cmd::login(proxy.as_ref(), user.as_ref(), f.auth.as_ref(), f.mfa);
         let target = if f.proxy.is_empty() {
