@@ -253,8 +253,11 @@ fn needs_interactive_login(stderr: &str) -> bool {
     s.contains("not a terminal") || s.contains("inappropriate ioctl") || s.contains("password")
 }
 
-#[derive(Debug, DeJson)]
+#[derive(DeJson)]
 struct TokenDto {
+    /// SECRET. A plain `String` only until `parse_token` moves it into a
+    /// `SecretString` (nanoserde can't target a domain type). Its parse
+    /// scratch buffer is nanoserde-internal and can't be wiped from here.
     token: String,
     #[nserde(default)]
     roles: Vec<String>,
@@ -264,6 +267,17 @@ struct TokenDto {
     ca_pins: Vec<String>,
 }
 
+impl core::fmt::Debug for TokenDto {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("TokenDto")
+            .field("token", &"<redacted>")
+            .field("roles", &self.roles)
+            .field("expires", &self.expires)
+            .field("ca_pins", &self.ca_pins)
+            .finish()
+    }
+}
+
 fn parse_token(stdout: &str) -> Result<GeneratedToken, DomainError> {
     // On parse failure, surface only a generic message - the input may contain
     // the secret token, so it must not appear in the error detail.
@@ -271,7 +285,7 @@ fn parse_token(stdout: &str) -> Result<GeneratedToken, DomainError> {
         detail: "could not parse token JSON".to_owned(),
     })?;
     Ok(GeneratedToken {
-        token: dto.token,
+        token: SecretString::new(dto.token),
         roles: dto.roles,
         expires: dto.expires,
         ca_pins: dto.ca_pins,
@@ -417,7 +431,9 @@ fn parse_invite(user: &str, stdout: &str) -> Result<InviteLink, DomainError> {
         .find(|w| w.starts_with("https://") || w.starts_with("http://"))
         .map(|u| InviteLink {
             user: user.to_owned(),
-            url: u.to_owned(),
+            // The one copy out of the zeroizing stdout, straight into a
+            // wiped-on-drop holder.
+            url: SecretString::new(u.to_owned()),
         })
         .ok_or(DomainError::Parse {
             detail: "could not find setup URL in output".to_owned(),
@@ -663,7 +679,7 @@ mod tests {
         let inv = parse_invite("bob", out).unwrap();
         assert_eq!(inv.user, "bob");
         assert_eq!(
-            inv.url,
+            inv.url.expose(),
             "https://proxy.example.com:443/web/invite/abcdef123456"
         );
         // No URL → generic error, never echoing the output.
@@ -676,7 +692,9 @@ mod tests {
         let json = r#"{"token":"deadbeef","roles":["Node"],
             "expires":"2026-06-29T00:02:06Z","ca_pins":["sha256:abc"]}"#;
         let t = parse_token(json).unwrap();
-        assert_eq!(t.token, "deadbeef");
+        assert_eq!(t.token.expose(), "deadbeef");
+        let dto: TokenDto = DeJson::deserialize_json(json).unwrap();
+        assert!(!format!("{dto:?}").contains("deadbeef"), "DTO Debug leaks");
         assert_eq!(t.roles, vec!["Node"]);
         assert_eq!(t.ca_pins.len(), 1);
     }

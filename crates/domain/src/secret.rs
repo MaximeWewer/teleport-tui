@@ -27,6 +27,13 @@ impl SecretString {
         &self.0
     }
 
+    /// Move the value out (no copy: the allocation moves with it), to hand it
+    /// straight to other wiping storage such as `zeroize::Zeroizing`.
+    #[must_use]
+    pub fn into_inner(mut self) -> String {
+        core::mem::take(&mut self.0)
+    }
+
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()

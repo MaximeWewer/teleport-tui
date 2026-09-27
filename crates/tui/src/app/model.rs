@@ -420,7 +420,8 @@ pub(crate) struct TokenView {
 impl From<GeneratedToken> for TokenView {
     fn from(g: GeneratedToken) -> Self {
         Self {
-            token: Zeroizing::new(g.token),
+            // Moves the allocation (no copy) from one wiping holder to another.
+            token: Zeroizing::new(g.token.into_inner()),
             roles: g.roles,
             expires: g.expires,
             ca_pins: g.ca_pins,
@@ -453,7 +454,7 @@ impl From<InviteLink> for InviteView {
     fn from(l: InviteLink) -> Self {
         Self {
             user: l.user,
-            url: Zeroizing::new(l.url),
+            url: Zeroizing::new(l.url.into_inner()),
         }
     }
 }

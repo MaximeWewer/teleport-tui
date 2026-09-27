@@ -144,7 +144,7 @@ impl AdminRepository for FakeAdmin {
     }
     fn generate_token(&self, token_type: &str) -> Result<GeneratedToken, DomainError> {
         Ok(GeneratedToken {
-            token: "secret-token-value".to_owned(),
+            token: SecretString::new("secret-token-value".to_owned()),
             roles: vec![token_type.to_owned()],
             expires: "2026-06-29T00:00:00Z".to_owned(),
             ca_pins: vec!["sha256:abc".to_owned()],
@@ -174,13 +174,13 @@ impl AdminRepository for FakeAdmin {
     fn add_user(&self, user: &str, _roles: &str) -> Result<InviteLink, DomainError> {
         Ok(InviteLink {
             user: user.to_owned(),
-            url: "https://proxy.example/web/invite/secret123".to_owned(),
+            url: SecretString::new("https://proxy.example/web/invite/secret123".to_owned()),
         })
     }
     fn reset_user(&self, user: &str) -> Result<InviteLink, DomainError> {
         Ok(InviteLink {
             user: user.to_owned(),
-            url: "https://proxy.example/web/reset/secret456".to_owned(),
+            url: SecretString::new("https://proxy.example/web/reset/secret456".to_owned()),
         })
     }
     fn list_bots(&self) -> Result<Vec<Bot>, DomainError> {

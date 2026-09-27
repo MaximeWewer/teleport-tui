@@ -128,7 +128,9 @@ pub(super) fn render_token_result(frame: &mut Frame, app: &App) {
         Line::from(vec![
             Span::raw("token:   "),
             Span::styled(
-                tv.token.as_str().to_owned(),
+                // Borrowed, not copied: a per-redraw `String` would be freed
+                // unwiped.
+                tv.token.as_str(),
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
@@ -166,7 +168,7 @@ pub(super) fn render_invite(frame: &mut Frame, app: &App) {
         Line::from(vec![
             Span::raw("url:  "),
             Span::styled(
-                iv.url.as_str().to_owned(),
+                iv.url.as_str(),
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),

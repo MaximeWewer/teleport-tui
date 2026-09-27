@@ -6,13 +6,14 @@ use crate::secret::SecretString;
 use crate::value::ResourceName;
 
 /// A freshly generated join token (`tctl tokens add`). The `token` field is a
-/// **secret**: it is shown once in the UI and must never be logged. `Debug` is
-/// hand-written to mask it, so the guarantee is structural - a stray `{:?}` (a
-/// log line, a panic message on an unwrapped `Result<GeneratedToken>`) can't leak
-/// the token, regardless of caller discipline.
+/// **secret**: it is shown once in the UI and must never be logged. It is a
+/// [`SecretString`] (wiped on drop, even on a path that drops it unshown) and
+/// `Debug` is hand-written to mask it, so the guarantee is structural - a stray
+/// `{:?}` (a log line, a panic message on an unwrapped `Result<GeneratedToken>`)
+/// can't leak the token, regardless of caller discipline.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GeneratedToken {
-    pub token: String,
+    pub token: SecretString,
     pub roles: Vec<String>,
     pub expires: String,
     pub ca_pins: Vec<String>,
@@ -30,13 +31,12 @@ impl core::fmt::Debug for GeneratedToken {
 }
 
 /// A one-time account-setup URL from `tctl users add` / `tctl users reset`. The
-/// `url` embeds a secret invitation token - show once, never log. Domain is
-/// dependency-free, so it is a plain `String`; the caller moves it into
-/// zeroizing storage immediately. `Debug` masks the `url` (see [`GeneratedToken`]).
+/// `url` embeds a secret invitation token - show once, never log. It is a
+/// [`SecretString`] (wiped on drop) and `Debug` masks it (see [`GeneratedToken`]).
 #[derive(Clone, PartialEq, Eq)]
 pub struct InviteLink {
     pub user: String,
-    pub url: String,
+    pub url: SecretString,
 }
 
 impl core::fmt::Debug for InviteLink {
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn debug_masks_generated_token_secret() {
         let t = GeneratedToken {
-            token: "s3cr3t-join-token".to_owned(),
+            token: SecretString::new("s3cr3t-join-token".to_owned()),
             roles: vec!["Node".to_owned()],
             expires: "2026-07-01T00:00:00Z".to_owned(),
             ca_pins: vec!["sha256:abc".to_owned()],
@@ -312,7 +312,7 @@ mod tests {
     fn debug_masks_invite_url_secret() {
         let inv = InviteLink {
             user: "bob".to_owned(),
-            url: "https://proxy.example/web/invite/s3cr3t123".to_owned(),
+            url: SecretString::new("https://proxy.example/web/invite/s3cr3t123".to_owned()),
         };
         let dbg = format!("{inv:?}");
         assert!(
