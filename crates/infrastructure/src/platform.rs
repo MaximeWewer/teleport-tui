@@ -51,13 +51,8 @@ fn locate_named(override_path: Option<PathBuf>, name: &str) -> Result<PathBuf, D
         return Err(DomainError::BinaryNotFound);
     }
 
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
-        }
+    if let Some(found) = std::env::var_os("PATH").and_then(|path| find_in_path(&path, name)) {
+        return Ok(found);
     }
 
     for dir in known_install_dirs() {
@@ -68,6 +63,16 @@ fn locate_named(override_path: Option<PathBuf>, name: &str) -> Result<PathBuf, D
     }
 
     Err(DomainError::BinaryNotFound)
+}
+
+/// First `dir/name` that is a file, over the absolute entries of a `PATH`-style
+/// list. Relative and empty entries are skipped: they resolve against the cwd,
+/// so a `./tsh` dropped in the working directory could otherwise win.
+fn find_in_path(path: &std::ffi::OsStr, name: &str) -> Option<PathBuf> {
+    std::env::split_paths(path)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 fn known_install_dirs() -> &'static [&'static str] {
@@ -167,4 +172,24 @@ pub fn config_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("teleport-tui")
         .join("config.toml")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_lookup_skips_relative_and_empty_entries() {
+        // Tests run with the crate root as cwd, so `./Cargo.toml` exists: a
+        // relative (`.`, `src/..`) or empty entry would find it.
+        let rel = std::env::join_paths(["", ".", "src/.."]).unwrap();
+        assert_eq!(find_in_path(&rel, "Cargo.toml"), None);
+
+        let abs_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mixed = std::env::join_paths([PathBuf::from("."), abs_dir.clone()]).unwrap();
+        assert_eq!(
+            find_in_path(&mixed, "Cargo.toml"),
+            Some(abs_dir.join("Cargo.toml"))
+        );
+    }
 }
