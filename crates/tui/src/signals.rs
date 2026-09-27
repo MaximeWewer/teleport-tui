@@ -40,7 +40,11 @@ pub(crate) fn install() -> std::io::Result<()> {
 
 /// No signals to hook off Unix.
 #[cfg(not(unix))]
-#[allow(clippy::unnecessary_wraps)]
+#[expect(
+    clippy::unnecessary_wraps,
+    clippy::missing_const_for_fn,
+    reason = "no-op stub must keep the fallible, non-const Unix signature"
+)]
 pub(crate) fn install() -> std::io::Result<()> {
     Ok(())
 }

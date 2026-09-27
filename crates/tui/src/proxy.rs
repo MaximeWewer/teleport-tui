@@ -437,6 +437,13 @@ fn port_is_free(port: u16) -> bool {
 /// may fork helper processes; without this, killing only the direct child would
 /// orphan those grandchildren and leak the port/tunnel. No-op off Unix (job
 /// control differs; there is no argv/no-shell concern here either way).
+#[cfg_attr(
+    not(unix),
+    expect(
+        clippy::missing_const_for_fn,
+        reason = "empty off Unix; must keep the non-const Unix signature"
+    )
+)]
 fn own_group(cmd: &mut Command) -> &mut Command {
     #[cfg(unix)]
     {
@@ -526,6 +533,13 @@ pub(crate) fn shutdown() {
 /// SIGKILL the process group led by `pid`. Errors (already gone) are ignored.
 /// Off Unix there is no process-group signal without extra dependencies, so
 /// this is a no-op; the direct child is still killed by [`stop_child`].
+#[cfg_attr(
+    not(unix),
+    expect(
+        clippy::missing_const_for_fn,
+        reason = "empty off Unix; must keep the non-const Unix signature"
+    )
+)]
 fn kill_group(pid: u32) {
     #[cfg(unix)]
     {
@@ -591,13 +605,16 @@ fn browser_command(url: &str) -> Command {
 #[cfg(test)]
 mod tests {
     use super::local_forward_port;
+    #[cfg(unix)]
     use std::sync::{Mutex, MutexGuard, PoisonError};
 
     /// Serialises the tests that pick and probe localhost ports: a port one test
     /// releases (`free_port`) could otherwise be handed to another test's `:0`
     /// bind, which would answer the first test's readiness probe.
+    #[cfg(unix)]
     static PORTS: Mutex<()> = Mutex::new(());
 
+    #[cfg(unix)]
     fn ports() -> MutexGuard<'static, ()> {
         PORTS.lock().unwrap_or_else(PoisonError::into_inner)
     }

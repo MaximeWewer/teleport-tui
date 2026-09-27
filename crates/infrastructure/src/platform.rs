@@ -163,6 +163,10 @@ fn restrict(path: &Path, mode: u32) {
 }
 
 #[cfg(not(unix))]
+#[expect(
+    clippy::missing_const_for_fn,
+    reason = "no-op stub must keep the non-const signature of the unix version"
+)]
 fn restrict(_path: &Path, _mode: u32) {}
 
 /// Path of the optional config file.
