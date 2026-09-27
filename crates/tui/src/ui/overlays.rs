@@ -64,7 +64,7 @@ pub(super) fn render_picker(frame: &mut Frame, app: &mut App) {
             .fg(Color::Magenta)
             .add_modifier(Modifier::BOLD),
     )))];
-    items.extend(topo.all().iter().map(|c| {
+    items.extend(topo.all().map(|c| {
         let dot = match c.status {
             ClusterStatus::Online => Span::styled("●", Style::default().fg(Color::Green)),
             ClusterStatus::Offline => Span::styled("●", Style::default().fg(Color::Red)),

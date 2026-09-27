@@ -108,7 +108,6 @@ impl App {
         let online = |t: &ClusterTopology| {
             let mut v: Vec<String> = t
                 .all()
-                .iter()
                 .filter(|c| c.is_online())
                 .map(|c| c.name.to_string())
                 .collect();
@@ -509,7 +508,7 @@ impl App {
     fn online_clusters(&self) -> Option<Vec<ClusterContext>> {
         self.topology
             .as_ref()
-            .map(|t| t.all().iter().filter(|c| c.is_online()).cloned().collect())
+            .map(|t| t.all().filter(|c| c.is_online()).cloned().collect())
     }
 
     fn dispatch_aggregate(&mut self) {

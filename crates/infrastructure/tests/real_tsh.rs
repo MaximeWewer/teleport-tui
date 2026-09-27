@@ -26,7 +26,7 @@ fn lists_real_clusters_and_nodes() {
         topo.leaves().count(),
         topo.selected().name
     );
-    assert!(!topo.all().is_empty());
+    assert!(topo.all().next().is_some());
 
     let nodes = TshNodeRepository::new(SystemCommandRunner, tsh);
     let list = nodes

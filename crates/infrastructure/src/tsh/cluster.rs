@@ -95,7 +95,7 @@ mod tests {
         };
         let repo = TshClusterRepository::new(runner, PathBuf::from("tsh"));
         let topo = repo.list_clusters().unwrap();
-        assert_eq!(topo.all().len(), 5);
+        assert_eq!(topo.all().count(), 5);
         assert_eq!(topo.root().name.as_str(), "root.example.com");
         assert_eq!(topo.selected().name.as_str(), "root.example.com");
         assert_eq!(topo.leaves().count(), 4);
@@ -113,7 +113,7 @@ mod tests {
         };
         let repo = TshClusterRepository::new(runner, PathBuf::from("tsh"));
         let topo = repo.list_clusters().unwrap();
-        assert_eq!(topo.all().len(), 2);
+        assert_eq!(topo.all().count(), 2);
         assert_eq!(topo.leaves().next().unwrap().name.as_str(), "leaf1");
     }
 }

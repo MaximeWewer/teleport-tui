@@ -171,7 +171,7 @@ impl App {
 
     pub(super) fn move_picker(&mut self, forward: bool) {
         // Entry 0 is "All clusters", entries 1.. are the real clusters.
-        let Some(count) = self.topology.as_ref().map(|t| t.all().len() + 1) else {
+        let Some(count) = self.topology.as_ref().map(|t| t.all().count() + 1) else {
             return;
         };
         let next = clamp_step(self.picker.selected().unwrap_or(0), count, forward);
@@ -197,7 +197,7 @@ impl App {
         let name = self
             .topology
             .as_ref()
-            .and_then(|t| t.all().get(sel - 1))
+            .and_then(|t| t.all().nth(sel - 1))
             .map(|c| c.name.clone());
         if let Some(name) = name
             && let Some(topo) = self.topology.as_mut()

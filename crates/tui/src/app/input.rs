@@ -281,11 +281,7 @@ impl App {
         let sel = if self.agg.enabled {
             0
         } else {
-            topo.all()
-                .iter()
-                .position(|c| c == topo.selected())
-                .unwrap_or(0)
-                + 1
+            topo.all().position(|c| c == topo.selected()).unwrap_or(0) + 1
         };
         self.mode = Mode::Picker;
         self.picker.select(Some(sel));

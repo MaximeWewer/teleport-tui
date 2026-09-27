@@ -587,7 +587,7 @@ mod tests {
     fn list_clusters_returns_the_repository_topology() {
         let topo = ListClusters::new(&Clusters(Ok(()))).execute().unwrap();
         assert_eq!(topo.root().name.as_str(), "root");
-        assert_eq!(topo.all().len(), 2);
+        assert_eq!(topo.all().count(), 2);
         let err = ListClusters::new(&Clusters(Err(()))).execute().unwrap_err();
         assert!(matches!(err, DomainError::NotAuthenticated));
     }

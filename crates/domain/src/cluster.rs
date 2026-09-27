@@ -32,16 +32,24 @@ impl ClusterContext {
 }
 
 /// The root cluster plus its leaves, and which one is currently selected.
-/// Invariant: exactly one root.
+///
+/// Invariant: exactly one root. It is held apart from the other clusters, so
+/// "there is a root" and "the selection always resolves" hold by construction
+/// rather than by index bookkeeping.
 #[derive(Debug, Clone)]
 pub struct ClusterTopology {
-    clusters: Vec<ClusterContext>,
-    selected: usize,
+    root: ClusterContext,
+    /// Every other listed cluster (the leaves), in listing order.
+    others: Vec<ClusterContext>,
+    /// Index into `others`; `None` selects the root.
+    selected: Option<usize>,
 }
 
 impl ClusterTopology {
-    /// Build from the clusters returned by `tsh clusters`. `selected_name` is
-    /// the cluster the CLI reported as current; falls back to the root.
+    /// Build from the clusters returned by `tsh clusters`.
+    ///
+    /// `selected_name` is the cluster the CLI reported as current; falls back
+    /// to the root.
     ///
     /// # Errors
     /// Returns [`DomainError`] if the list is empty or has no root.
@@ -55,60 +63,71 @@ impl ClusterTopology {
                 detail: "cluster list is empty".to_owned(),
             });
         }
-        let root = clusters.iter().position(|c| c.kind == ClusterKind::Root);
-        let Some(root_idx) = root else {
+        let mut root = None;
+        let mut others = Vec::with_capacity(clusters.len() - 1);
+        for c in clusters {
+            if root.is_none() && c.kind == ClusterKind::Root {
+                root = Some(c);
+            } else {
+                others.push(c);
+            }
+        }
+        let Some(root) = root else {
             return Err(DomainError::Backend {
                 code: "NO_ROOT_CLUSTER",
                 detail: "no root cluster in topology".to_owned(),
             });
         };
-        let selected = selected_name
-            .and_then(|n| clusters.iter().position(|c| &c.name == n))
-            .unwrap_or(root_idx);
-        Ok(Self { clusters, selected })
+        let mut topo = Self {
+            root,
+            others,
+            selected: None,
+        };
+        if let Some(name) = selected_name {
+            // An unknown current cluster keeps the root selected.
+            let _ = topo.select(name);
+        }
+        Ok(topo)
+    }
+
+    /// Every cluster, root first, then the others in listing order.
+    pub fn all(&self) -> impl Iterator<Item = &ClusterContext> + '_ {
+        std::iter::once(&self.root).chain(&self.others)
     }
 
     #[must_use]
-    pub fn all(&self) -> &[ClusterContext] {
-        &self.clusters
-    }
-
-    #[must_use]
-    // The `[0]` fallback is invariant-safe: `new` guarantees a non-empty list and
-    // no method removes elements, so `clusters[0]` always exists.
-    #[allow(clippy::indexing_slicing)]
     pub fn selected(&self) -> &ClusterContext {
-        // `selected` is a valid index by construction; if that invariant ever
-        // broke, degrade to the first cluster rather than panic.
-        self.clusters
-            .get(self.selected)
-            .unwrap_or(&self.clusters[0])
+        // `select` only stores indices it found, so this always resolves; the
+        // root fallback just keeps the method total.
+        self.selected
+            .and_then(|i| self.others.get(i))
+            .unwrap_or(&self.root)
     }
 
     #[must_use]
-    // The `[0]` fallback is invariant-safe (non-empty list; see `selected`); a
-    // root is also guaranteed by `new`, so `find` never actually misses.
-    #[allow(clippy::indexing_slicing)]
-    pub fn root(&self) -> &ClusterContext {
-        self.clusters
-            .iter()
-            .find(|c| c.kind == ClusterKind::Root)
-            .unwrap_or(&self.clusters[0])
+    pub const fn root(&self) -> &ClusterContext {
+        &self.root
     }
 
     pub fn leaves(&self) -> impl Iterator<Item = &ClusterContext> + '_ {
-        self.clusters.iter().filter(|c| c.kind == ClusterKind::Leaf)
+        self.others.iter().filter(|c| c.kind == ClusterKind::Leaf)
     }
 
-    /// Select a cluster by name. Validating against the real topology prevents
-    /// targeting an arbitrary, unverified cluster name.
+    /// Select a cluster by name.
+    ///
+    /// Validating against the real topology prevents targeting an arbitrary,
+    /// unverified cluster name.
     ///
     /// # Errors
     /// Returns [`DomainError::InvalidValue`] if the name is unknown.
     pub fn select(&mut self, name: &ClusterName) -> Result<(), DomainError> {
-        match self.clusters.iter().position(|c| &c.name == name) {
+        if self.root.name == *name {
+            self.selected = None;
+            return Ok(());
+        }
+        match self.others.iter().position(|c| &c.name == name) {
             Some(idx) => {
-                self.selected = idx;
+                self.selected = Some(idx);
                 Ok(())
             }
             None => Err(DomainError::InvalidValue {
@@ -182,7 +201,14 @@ mod tests {
         assert_eq!(topo.root().name.as_str(), "root");
         let leaves: Vec<_> = topo.leaves().map(|c| c.name.as_str()).collect();
         assert_eq!(leaves, ["leaf-a", "leaf-b"]);
-        assert_eq!(topo.all().len(), 3);
+        assert_eq!(topo.all().count(), 3);
+    }
+
+    #[test]
+    fn all_lists_the_root_first_then_the_others_in_order() {
+        let topo = topology(None);
+        let names: Vec<_> = topo.all().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["root", "leaf-a", "leaf-b"]);
     }
 
     #[test]
@@ -200,7 +226,7 @@ mod tests {
         ));
         // A rejected selection leaves the previous one (and the list) intact.
         assert_eq!(topo.selected().name.as_str(), "leaf-a");
-        assert_eq!(topo.all().len(), 3);
+        assert_eq!(topo.all().count(), 3);
     }
 
     #[test]
