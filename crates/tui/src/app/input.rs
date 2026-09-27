@@ -386,10 +386,10 @@ impl App {
                 let name = self.proxy.as_ref().map(|p| p.name.clone());
                 self.proxy = None;
                 self.mode = Mode::Normal;
-                self.status = Some(match name {
-                    Some(n) => format!("app proxy stopped ({n})"),
-                    None => "app proxy stopped".to_owned(),
-                });
+                self.status = Some(name.map_or_else(
+                    || "app proxy stopped".to_owned(),
+                    |n| format!("app proxy stopped ({n})"),
+                ));
             }
             _ => {}
         }

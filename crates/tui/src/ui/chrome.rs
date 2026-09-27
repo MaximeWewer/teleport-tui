@@ -4,6 +4,7 @@
 //! Split out of `ui`.
 
 use domain::cluster::{ClusterContext, ClusterKind, ClusterStatus};
+use domain::profile::Profile;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -134,27 +135,31 @@ pub(super) fn render_status(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn profile_line(app: &App) -> Line<'static> {
-    match &app.profile {
-        Some(p) => {
-            let exp: String = p.valid_until.chars().take(19).collect();
-            Line::from(vec![
-                Span::styled(
-                    p.username.clone(),
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  logins: "),
-                Span::raw(p.logins.join(",")),
-                Span::raw("  cert valid until "),
-                Span::styled(exp, Style::default().fg(Color::DarkGray)),
-            ])
-        }
-        None => Line::from(Span::styled(
-            "not logged in - press L to login",
-            Style::default().fg(Color::Red),
-        )),
-    }
+    app.profile.as_ref().map_or_else(
+        || {
+            Line::from(Span::styled(
+                "not logged in - press L to login",
+                Style::default().fg(Color::Red),
+            ))
+        },
+        signed_in_line,
+    )
+}
+
+fn signed_in_line(p: &Profile) -> Line<'static> {
+    let exp: String = p.valid_until.chars().take(19).collect();
+    Line::from(vec![
+        Span::styled(
+            p.username.clone(),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  logins: "),
+        Span::raw(p.logins.join(",")),
+        Span::raw("  cert valid until "),
+        Span::styled(exp, Style::default().fg(Color::DarkGray)),
+    ])
 }
 
 /// Build the Normal-mode footer from context: the active tab's actions, the
