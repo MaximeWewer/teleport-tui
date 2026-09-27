@@ -110,21 +110,12 @@ fn real_main() -> Result<(), String> {
     };
     let logger = Box::new(NdjsonLogger::at_default_path());
 
-    let kube_tools = if config.kube_tools.is_empty() {
-        default_kube_tools()
-    } else {
-        config.kube_tools.clone()
-    };
+    let mut prefs = config.preferences();
+    if prefs.kube_tools.is_empty() {
+        prefs.kube_tools = default_kube_tools();
+    }
     let settings = app::Settings {
-        kube_tools,
-        login_proxy: config.proxy.clone(),
-        login_user: config.user.clone(),
-        login_auth: config.auth.clone(),
-        login_mfa: config.mfa,
-        default_login: config.default_login.clone(),
-        default_kube_user: config.kube_user.clone(),
-        default_db_user: config.db_user.clone(),
-        refresh_seconds: config.refresh_seconds,
+        prefs,
         // Probe the installed tsh once so the UI hides unsupported actions.
         capabilities: TshCapabilityProbe::new(SystemCommandRunner, tsh.clone()).probe(),
     };

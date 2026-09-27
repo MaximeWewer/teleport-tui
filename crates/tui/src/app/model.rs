@@ -217,20 +217,12 @@ pub(crate) enum PendingConnect {
     },
 }
 
-/// UI configuration injected from `config.toml` at startup. Mirrors the editable
-/// subset of the config file; the Settings screen writes it back through the
-/// injected [`PreferencesStore`].
+/// UI configuration injected at startup: the editable defaults from
+/// `config.toml` (the Settings screen writes them back through the injected
+/// [`PreferencesStore`]) plus the probed `tsh` capabilities.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Settings {
-    pub(crate) kube_tools: Vec<String>,
-    pub(crate) login_proxy: Option<String>,
-    pub(crate) login_user: Option<String>,
-    pub(crate) login_auth: Option<AuthMethod>,
-    pub(crate) login_mfa: Option<MfaMode>,
-    pub(crate) default_login: Option<String>,
-    pub(crate) default_kube_user: Option<String>,
-    pub(crate) default_db_user: Option<String>,
-    pub(crate) refresh_seconds: Option<u64>,
+    pub(crate) prefs: Preferences,
     /// What the installed `tsh` supports (gates tabs/actions at runtime).
     pub(crate) capabilities: Capabilities,
 }

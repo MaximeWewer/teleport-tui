@@ -15,7 +15,7 @@ use application::use_case::{
 use domain::admin::{
     AdminRole, AdminUser, Bot, GeneratedToken, Instance, InviteLink, ProvisionToken,
 };
-use domain::auth::{AuthMethod, MfaMode};
+use domain::auth::AuthMethod;
 use domain::capability::Capabilities;
 use domain::cluster::{ClusterContext, ClusterTopology};
 use domain::error::{DomainError, ReportableError};
@@ -105,8 +105,6 @@ pub(crate) struct App {
     /// In-progress `tsh kube exec` form (Kube tab).
     pub(crate) kube_exec_form: KubeExecForm,
     pub(crate) user_choices: PickList<String>,
-    /// Configured Kubernetes launchers (e.g. shell, k9s).
-    kube_tools: Vec<String>,
     pub(crate) tool_choices: PickList<String>,
     /// The currently running background app proxy (stopped on drop / Esc).
     pub(crate) proxy: Option<AppProxy>,
@@ -117,17 +115,9 @@ pub(crate) struct App {
     /// data was last loaded for. A matching key means "show cache, don't refetch".
     cache_key: HashMap<Tab, String>,
     pub(crate) login_form: LoginForm,
-    login_proxy: Option<String>,
-    login_user: Option<String>,
-    /// Persisted login-form defaults (auth connector / MFA mode).
-    login_auth: Option<AuthMethod>,
-    login_mfa: Option<MfaMode>,
-    /// Persisted default users that skip the per-resource pickers/prompts.
-    default_login: Option<String>,
-    default_kube_user: Option<String>,
-    default_db_user: Option<String>,
-    /// Auto-refresh interval (persisted; applied on next launch).
-    refresh_seconds: Option<u64>,
+    /// The live user defaults (login form, users that skip the pickers,
+    /// Kubernetes launchers, refresh interval), edited by the Settings screen.
+    pub(crate) prefs: Preferences,
     /// Where the Settings screen persists its edits (injected port; the
     /// `config.toml` file in production).
     prefs_store: Box<dyn PreferencesStore>,
@@ -205,15 +195,7 @@ impl App {
     ) -> Self {
         let dispatcher = Dispatcher::new(repos, synchronous);
         let Settings {
-            kube_tools,
-            login_proxy,
-            login_user,
-            login_auth,
-            login_mfa,
-            default_login,
-            default_kube_user,
-            default_db_user,
-            refresh_seconds,
+            prefs,
             capabilities,
         } = settings;
         Self {
@@ -243,20 +225,12 @@ impl App {
             add_user_form: AddUserForm::default(),
             kube_exec_form: KubeExecForm::default(),
             user_choices: PickList::default(),
-            kube_tools,
             tool_choices: PickList::default(),
             proxy: None,
             forwards: PickList::default(),
             cache_key: HashMap::new(),
             login_form: LoginForm::default(),
-            login_proxy,
-            login_user,
-            login_auth,
-            login_mfa,
-            default_login,
-            default_kube_user,
-            default_db_user,
-            refresh_seconds,
+            prefs,
             prefs_store,
             settings_form: SettingsForm::default(),
             aggregate: false,

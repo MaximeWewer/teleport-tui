@@ -16,7 +16,7 @@ impl App {
             .as_ref()
             .map(|p| p.cluster.clone())
             .filter(|s| !s.is_empty())
-            .or_else(|| self.login_proxy.clone())
+            .or_else(|| self.prefs.proxy.clone())
             .unwrap_or_default();
         self.open_login_form_proxy(proxy);
     }
@@ -29,14 +29,14 @@ impl App {
             .as_ref()
             .map(|p| p.username.clone())
             .filter(|s| !s.is_empty())
-            .or_else(|| self.login_user.clone())
+            .or_else(|| self.prefs.user.clone())
             .unwrap_or_default();
         // Seed the dropdowns from the persisted defaults.
         self.login_form = LoginForm {
             proxy,
             user,
-            auth: self.login_auth.clone(),
-            mfa: self.login_mfa,
+            auth: self.prefs.auth.clone(),
+            mfa: self.prefs.mfa,
             field: 0,
         };
         self.mode = Mode::LoginForm;
@@ -73,18 +73,19 @@ impl App {
     /// Open the Settings screen, pre-filled from the live persisted defaults.
     pub(super) fn open_settings_form(&mut self) {
         self.settings_form = SettingsForm {
-            ssh_login: self.default_login.clone().unwrap_or_default(),
-            kube_user: self.default_kube_user.clone().unwrap_or_default(),
-            db_user: self.default_db_user.clone().unwrap_or_default(),
-            proxy: self.login_proxy.clone().unwrap_or_default(),
-            user: self.login_user.clone().unwrap_or_default(),
-            auth: self.login_auth.clone(),
-            mfa: self.login_mfa,
+            ssh_login: self.prefs.default_login.clone().unwrap_or_default(),
+            kube_user: self.prefs.kube_user.clone().unwrap_or_default(),
+            db_user: self.prefs.db_user.clone().unwrap_or_default(),
+            proxy: self.prefs.proxy.clone().unwrap_or_default(),
+            user: self.prefs.user.clone().unwrap_or_default(),
+            auth: self.prefs.auth.clone(),
+            mfa: self.prefs.mfa,
             refresh: self
+                .prefs
                 .refresh_seconds
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
-            kube_tools: self.kube_tools.join(", "),
+            kube_tools: self.prefs.kube_tools.join(", "),
             field: 0,
         };
         self.mode = Mode::Settings;
@@ -106,14 +107,14 @@ impl App {
         }
         // Helper: empty string → None (key omitted from the file).
         let opt = |s: &str| (!s.trim().is_empty()).then(|| s.trim().to_owned());
-        self.default_login = opt(&f.ssh_login);
-        self.default_kube_user = opt(&f.kube_user);
-        self.default_db_user = opt(&f.db_user);
-        self.login_proxy = opt(&f.proxy);
-        self.login_user = opt(&f.user);
-        self.login_auth = f.auth;
-        self.login_mfa = f.mfa;
-        self.refresh_seconds = f.refresh.trim().parse::<u64>().ok().filter(|n| *n > 0);
+        self.prefs.default_login = opt(&f.ssh_login);
+        self.prefs.kube_user = opt(&f.kube_user);
+        self.prefs.db_user = opt(&f.db_user);
+        self.prefs.proxy = opt(&f.proxy);
+        self.prefs.user = opt(&f.user);
+        self.prefs.auth = f.auth;
+        self.prefs.mfa = f.mfa;
+        self.prefs.refresh_seconds = f.refresh.trim().parse::<u64>().ok().filter(|n| *n > 0);
         let tools: Vec<String> = f
             .kube_tools
             .split(',')
@@ -121,7 +122,7 @@ impl App {
             .filter(|s| !s.is_empty())
             .collect();
         if !tools.is_empty() {
-            self.kube_tools = tools;
+            self.prefs.kube_tools = tools;
         }
         self.mode = Mode::Normal;
         self.persist_settings();
@@ -131,18 +132,7 @@ impl App {
     /// Write the live defaults back through the preferences store (which keeps
     /// the keys this screen doesn't edit, e.g. `tsh_path`).
     fn persist_settings(&mut self) {
-        let prefs = Preferences {
-            proxy: self.login_proxy.clone(),
-            user: self.login_user.clone(),
-            auth: self.login_auth.clone(),
-            mfa: self.login_mfa,
-            default_login: self.default_login.clone(),
-            kube_user: self.default_kube_user.clone(),
-            db_user: self.default_db_user.clone(),
-            refresh_seconds: self.refresh_seconds,
-            kube_tools: self.kube_tools.clone(),
-        };
-        self.status = Some(match self.prefs_store.save(&prefs) {
+        self.status = Some(match self.prefs_store.save(&self.prefs) {
             Ok(()) => format!("settings saved → {}", self.prefs_store.location()),
             Err(e) => format!("[CONFIG_SAVE_FAILED] {e}"),
         });
@@ -526,7 +516,7 @@ impl App {
                     return Outcome::Continue;
                 };
                 // A configured default kube user skips the picker (→ tool choice).
-                if let Some(user) = typed_default::<Identifier>(self.default_kube_user.as_deref()) {
+                if let Some(user) = typed_default::<Identifier>(self.prefs.kube_user.as_deref()) {
                     return self.offer_kube_tool(cluster, name, Some(user));
                 }
                 let users = self.profile_kube_users();
@@ -537,7 +527,7 @@ impl App {
                     return Outcome::Continue;
                 };
                 // A configured default db user connects directly; else prompt.
-                if let Some(user) = typed_default::<Identifier>(self.default_db_user.as_deref()) {
+                if let Some(user) = typed_default::<Identifier>(self.prefs.db_user.as_deref()) {
                     return Outcome::Run {
                         label: format!("Connecting to database {name} as {user}…"),
                         args: cmd::db_connect(&cluster, &name, Some(&user)),
@@ -576,7 +566,7 @@ impl App {
 
     /// The configured default SSH login, if set and a valid [`Login`].
     fn default_login_typed(&self) -> Option<Login> {
-        typed_default(self.default_login.as_deref())
+        typed_default(self.prefs.default_login.as_deref())
     }
 
     fn profile_logins(&self) -> Vec<String> {
@@ -682,10 +672,10 @@ impl App {
         name: ResourceName,
         user: Option<Identifier>,
     ) -> Outcome {
-        let tools = if self.kube_tools.is_empty() {
+        let tools = if self.prefs.kube_tools.is_empty() {
             vec!["shell".to_owned()]
         } else {
-            self.kube_tools.clone()
+            self.prefs.kube_tools.clone()
         };
         if let [tool] = tools.as_slice() {
             self.mode = Mode::Normal;
@@ -818,7 +808,7 @@ impl App {
         let Some((cluster, name)) = self.resource_target() else {
             return Outcome::Continue;
         };
-        let db_user = typed_default::<Identifier>(self.default_db_user.as_deref());
+        let db_user = typed_default::<Identifier>(self.prefs.db_user.as_deref());
         Outcome::Run {
             label: format!("Logging in to database {name}…"),
             args: cmd::db_login(&cluster, &name, db_user.as_ref()),

@@ -345,9 +345,10 @@ fn test_app_with(admin: Box<dyn AdminRepository>, auth: Box<dyn AuthGateway>) ->
     let repos = test_repos_with(admin, auth);
     // `synchronous = true`: jobs run inline so tests are deterministic.
     let settings = Settings {
-        kube_tools: vec!["shell".to_owned(), "k9s".to_owned()],
-        login_proxy: None,
-        login_user: None,
+        prefs: Preferences {
+            kube_tools: vec!["shell".to_owned(), "k9s".to_owned()],
+            ..Preferences::default()
+        },
         ..Settings::default()
     };
     let mut app = App::new(
@@ -573,9 +574,10 @@ fn async_app() -> App {
         "t".to_owned(),
         PathBuf::from("tsh"),
         Settings {
-            kube_tools: vec!["shell".to_owned()],
-            login_proxy: None,
-            login_user: None,
+            prefs: Preferences {
+                kube_tools: vec!["shell".to_owned()],
+                ..Preferences::default()
+            },
             ..Settings::default()
         },
         false,
@@ -1070,9 +1072,10 @@ fn switching_cluster_invalidates_cache_and_refetches() {
         "t".to_owned(),
         PathBuf::from("tsh"),
         Settings {
-            kube_tools: vec!["shell".to_owned()],
-            login_proxy: None,
-            login_user: None,
+            prefs: Preferences {
+                kube_tools: vec!["shell".to_owned()],
+                ..Preferences::default()
+            },
             ..Settings::default()
         },
         true,
@@ -1124,7 +1127,10 @@ fn entering_all_clusters_reuses_active_cluster_data() {
         "t".to_owned(),
         PathBuf::from("tsh"),
         Settings {
-            kube_tools: vec!["shell".to_owned()],
+            prefs: Preferences {
+                kube_tools: vec!["shell".to_owned()],
+                ..Preferences::default()
+            },
             ..Settings::default()
         },
         true,
@@ -1177,9 +1183,10 @@ fn switching_tabs_uses_cache_and_r_forces_refetch() {
         "t".to_owned(),
         PathBuf::from("tsh"),
         Settings {
-            kube_tools: vec!["shell".to_owned()],
-            login_proxy: None,
-            login_user: None,
+            prefs: Preferences {
+                kube_tools: vec!["shell".to_owned()],
+                ..Preferences::default()
+            },
             ..Settings::default()
         },
         true,
@@ -1939,7 +1946,7 @@ fn logout_clears_all_resources() {
 #[test]
 fn default_login_skips_picker() {
     let mut app = test_app();
-    app.default_login = Some("ubuntu".to_owned());
+    app.prefs.default_login = Some("ubuntu".to_owned());
     // Enter on a node connects directly as the default login (no picker).
     match app.on_key(KeyEvent::from(KeyCode::Enter)) {
         Outcome::Run { args, .. } => {
@@ -1965,7 +1972,7 @@ fn settings_edit_persists_to_file() {
     }
     app.on_key(KeyEvent::from(KeyCode::Enter)); // save
     assert_eq!(app.mode, Mode::Normal);
-    assert_eq!(app.default_login.as_deref(), Some("ubuntu"));
+    assert_eq!(app.prefs.default_login.as_deref(), Some("ubuntu"));
     // The file was written and reloads with the same value.
     let reloaded = infrastructure::config::Config::load(&path);
     assert_eq!(reloaded.default_login.as_deref(), Some("ubuntu"));
