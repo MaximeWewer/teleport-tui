@@ -35,6 +35,11 @@ enum Attempt<T> {
 /// first lost the port ([`Attempt::PortLost`], retryable); one still alive after
 /// the grace period is stuck on something a new port wouldn't fix
 /// ([`Attempt::Failed`]).
+///
+/// "Something answers on the port" alone is not proof the answer is *our*
+/// proxy: a process that grabbed the port first would answer while the child
+/// fails to bind and exits. Callers check the port is free before spawning, and
+/// a connect only counts while the child is still running.
 fn await_listen(child: &mut Child, port: u16) -> Attempt<()> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
     for _ in 0..30 {
@@ -42,7 +47,11 @@ fn await_listen(child: &mut Child, port: u16) -> Attempt<()> {
             return Attempt::PortLost;
         }
         if TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
-            return Attempt::Ready(());
+            return match child.try_wait() {
+                Ok(None) => Attempt::Ready(()),
+                // Exited (or unknowable): whatever answered is not our proxy.
+                _ => Attempt::PortLost,
+            };
         }
         sleep(Duration::from_millis(100));
     }
@@ -63,6 +72,14 @@ fn start_listening_proxy(
     spawn: impl Fn(u16) -> io::Result<Child>,
 ) -> io::Result<(Child, u16)> {
     if let Some(p) = port {
+        // Refuse up front if something already listens there: otherwise it would
+        // answer the readiness probe and the browser would be sent to it.
+        if !port_is_free(p) {
+            return Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                "the requested local port is already in use",
+            ));
+        }
         let mut child = spawn(p)?;
         return match await_listen(&mut child, p) {
             Attempt::Ready(()) => Ok((child, p)),
@@ -396,6 +413,13 @@ fn free_port() -> io::Result<u16> {
     Ok(listener.local_addr()?.port())
 }
 
+/// Whether nothing is bound to localhost `port` right now (a bind succeeds and
+/// is released at once). A listener on the wildcard address also makes this
+/// bind fail, so it counts as taken.
+fn port_is_free(port: u16) -> bool {
+    TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok()
+}
+
 /// Put a background proxy child in its **own process group** (leader = the child)
 /// so its whole tree can be signalled together by [`stop_child`]. `tsh proxy`
 /// may fork helper processes; without this, killing only the direct child would
@@ -575,6 +599,49 @@ mod tests {
         });
         assert!(result.is_err(), "should give up, not succeed");
         assert_eq!(attempts.load(Ordering::Relaxed), PORT_RETRIES);
+    }
+
+    // A requested port that something already listens on is refused before any
+    // child is spawned: the squatter must not be mistaken for the proxy.
+    #[cfg(unix)]
+    #[test]
+    fn explicit_port_already_in_use_is_refused_without_spawning() {
+        use super::start_listening_proxy;
+        use std::net::{Ipv4Addr, TcpListener};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let squatter = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
+        let port = squatter.local_addr().expect("addr").port();
+        let spawns = AtomicUsize::new(0);
+        let result = start_listening_proxy(Some(port), |_| {
+            spawns.fetch_add(1, Ordering::Relaxed);
+            std::process::Command::new("true").spawn()
+        });
+        let err = result.expect_err("port in use must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+        assert_eq!(spawns.load(Ordering::Relaxed), 0);
+    }
+
+    // Something answers on the port but the child has already died (it lost the
+    // bind): that answer is not our proxy, so it must not read as ready.
+    #[cfg(unix)]
+    #[test]
+    fn a_dead_child_is_not_ready_even_if_the_port_answers() {
+        use super::{Attempt, await_listen};
+        use std::net::{Ipv4Addr, TcpListener};
+        use std::process::{Command, Stdio};
+
+        let squatter = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
+        let port = squatter.local_addr().expect("addr").port();
+        let mut child = Command::new("true")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn true");
+        // Reaped: `try_wait` now reports the cached exit status deterministically.
+        child.wait().expect("wait");
+        assert!(matches!(await_listen(&mut child, port), Attempt::PortLost));
     }
 
     // Proof that stop_child reaches grandchildren: the direct child forks a
