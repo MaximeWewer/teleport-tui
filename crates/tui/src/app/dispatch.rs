@@ -85,6 +85,13 @@ pub(super) enum JobResult {
         cluster: String,
         rows: Vec<AggRow>,
     },
+    /// Re-selecting the root profile after a leaf-scoped operation failed, so
+    /// `~/.tsh` may still point at a leaf. Surfaced (status bar + error log)
+    /// instead of dropped: every later `tsh`/`tctl` call would read the leaf.
+    RestoreFailed {
+        root: String,
+        error: AppError,
+    },
 }
 
 /// Run a job against the repositories. Pure dispatch - safe to call from a
@@ -131,6 +138,64 @@ fn run_job(repos: &Repositories, job: Job) -> JobResult {
             JobResult::Aggregate { tab, cluster, rows }
         }
     }
+}
+
+/// The error result of `job`, for when it cannot run at all (its cluster could
+/// not be selected). Keeps the job's own result variant so the UI applies it
+/// like any failed listing - never another cluster's rows under this label.
+fn failed_job(job: Job, e: AppError) -> JobResult {
+    match job {
+        Job::Clusters => JobResult::Clusters(Err(e)),
+        Job::Status => JobResult::Status(Err(e)),
+        Job::Nodes(_) => JobResult::Nodes(Err(e)),
+        Job::Kube(_) => JobResult::Kube(Err(e)),
+        Job::Db(_) => JobResult::Db(Err(e)),
+        Job::Apps(_) => JobResult::Apps(Err(e)),
+        Job::Requests(_) => JobResult::Requests(Err(e)),
+        Job::Recordings(_) => JobResult::Recordings(Err(e)),
+        Job::Users => JobResult::Users(Err(e)),
+        Job::Roles => JobResult::Roles(Err(e)),
+        Job::Tokens => JobResult::Tokens(Err(e)),
+        Job::Bots => JobResult::Bots(Err(e)),
+        Job::Instances => JobResult::Instances(Err(e)),
+        Job::Mfa => JobResult::Mfa(Err(e)),
+        Job::Sessions(_) => JobResult::Sessions(Err(e)),
+        Job::RemoveToken(_) => JobResult::TokenRemoved(Err(e)),
+        Job::AddUser { .. } | Job::ResetUser(_) => JobResult::Invite(Err(e)),
+        Job::GenerateToken(_) => JobResult::Token(Err(e)),
+        Job::AdminProbe => JobResult::AdminAllowed(false),
+        Job::Aggregate { tab, ctx } => JobResult::Aggregate {
+            tab,
+            cluster: ctx.name.to_string(),
+            rows: Err(e),
+        },
+    }
+}
+
+/// Run `job` against `cluster` (re-keyed first), then restore `root`. If the
+/// switch fails the job is not run (it would read whatever cluster the profile
+/// is on) and its error result is returned instead. A failed restore adds a
+/// [`JobResult::RestoreFailed`] after the job's result.
+fn run_scoped(repos: &Repositories, job: Job, cluster: &str, root: &str) -> Vec<JobResult> {
+    let result = match repos.admin.select_cluster(cluster) {
+        Ok(()) => run_job(repos, job),
+        Err(e) => failed_job(job, e.into()),
+    };
+    let mut out = vec![result];
+    out.extend(restore_root(repos, root));
+    out
+}
+
+/// Re-select the `root` profile; `Some(RestoreFailed)` if that fails.
+fn restore_root(repos: &Repositories, root: &str) -> Option<JobResult> {
+    repos
+        .admin
+        .select_cluster(root)
+        .err()
+        .map(|e| JobResult::RestoreFailed {
+            root: root.to_owned(),
+            error: e.into(),
+        })
 }
 
 /// One cluster's rows for an all-clusters admin fan-out. `tctl` targets the
@@ -365,30 +430,30 @@ impl Dispatcher {
         job: Job,
         cluster: String,
         root: String,
-    ) -> Option<(u64, JobResult)> {
+    ) -> Vec<(u64, JobResult)> {
         if self.synchronous {
-            let _ = self.repos.admin.select_cluster(&cluster);
-            let result = run_job(&self.repos, job);
-            let _ = self.repos.admin.select_cluster(&root);
-            return Some((seq, result));
+            return run_scoped(&self.repos, job, &cluster, &root)
+                .into_iter()
+                .map(|r| (seq, r))
+                .collect();
         }
         let repos = Arc::clone(&self.repos);
         let tx = self.job_tx.clone();
         let profile_lock = Arc::clone(&self.profile_lock);
         std::thread::spawn(move || {
-            let result = {
+            // Switch, read and restore root all inside the critical section (see
+            // spawn_admin_stream).
+            let results = {
                 let _guard = profile_lock
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let _ = repos.admin.select_cluster(&cluster);
-                let out = run_job(&repos, job);
-                // Restore root inside the critical section (see spawn_admin_stream).
-                let _ = repos.admin.select_cluster(&root);
-                out
+                run_scoped(&repos, job, &cluster, &root)
             };
-            let _ = tx.send((seq, result));
+            for result in results {
+                let _ = tx.send((seq, result));
+            }
         });
-        None
+        Vec::new()
     }
 
     /// All-clusters admin fan-out, **streamed serially**: `tctl` has no cluster
@@ -408,7 +473,7 @@ impl Dispatcher {
             let mut out = Vec::new();
             for ctx in &clusters {
                 let rows = admin_cluster_rows(&self.repos, tab, ctx);
-                self.restore_profile(&root);
+                let restore = restore_root(&self.repos, &root);
                 out.push((
                     seq,
                     JobResult::AggregateAdmin {
@@ -417,6 +482,7 @@ impl Dispatcher {
                         rows,
                     },
                 ));
+                out.extend(restore.map(|r| (seq, r)));
             }
             return out;
         }
@@ -430,7 +496,7 @@ impl Dispatcher {
                 // second concurrent fan-out (or a `spawn_after_action` restore)
                 // can't flip the global profile mid-listing and make this `tctl`
                 // read return another cluster's rows.
-                let rows = {
+                let (rows, restore) = {
                     let _guard = profile_lock
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -440,11 +506,13 @@ impl Dispatcher {
                     // if the app exits mid-fan (worker thread killed), the profile
                     // is left on root, not stranded on a leaf (which would break
                     // every later tsh/tctl call).
-                    let _ = repos.admin.select_cluster(&root);
-                    rows
+                    (rows, restore_root(&repos, &root))
                 };
                 // Keep going even if a send fails (app exiting).
                 let _ = tx.send((seq, JobResult::AggregateAdmin { tab, cluster, rows }));
+                if let Some(failed) = restore {
+                    let _ = tx.send((seq, failed));
+                }
             }
         });
         Vec::new()
@@ -465,30 +533,36 @@ impl Dispatcher {
         reload_topology: bool,
     ) -> Vec<(u64, JobResult)> {
         if self.synchronous {
-            if let Some(root) = &restore_root {
-                let _ = self.repos.admin.select_cluster(root);
-            }
+            let failed = restore_root
+                .as_deref()
+                .and_then(|root| self::restore_root(&self.repos, root));
             let mut out = vec![(0, run_job(&self.repos, Job::Status))];
             if reload_topology {
                 out.push((0, run_job(&self.repos, Job::Clusters)));
                 out.push((0, run_job(&self.repos, Job::AdminProbe)));
             }
+            // Reported last so the refresh's own status doesn't hide it.
+            out.extend(failed.map(|r| (0, r)));
             return out;
         }
         let repos = Arc::clone(&self.repos);
         let tx = self.job_tx.clone();
         let profile_lock = Arc::clone(&self.profile_lock);
         std::thread::spawn(move || {
-            if let Some(root) = restore_root {
+            let failed = restore_root.and_then(|root| {
                 let _guard = profile_lock
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let _ = repos.admin.select_cluster(&root);
-            }
+                self::restore_root(&repos, &root)
+            });
             let _ = tx.send((0, run_job(&repos, Job::Status)));
             if reload_topology {
                 let _ = tx.send((0, run_job(&repos, Job::Clusters)));
                 let _ = tx.send((0, run_job(&repos, Job::AdminProbe)));
+            }
+            // Reported last so the refresh's own status doesn't hide it.
+            if let Some(failed) = failed {
+                let _ = tx.send((0, failed));
             }
         });
         Vec::new()
@@ -506,15 +580,6 @@ impl Dispatcher {
     /// A clone of the proxy-event sender for a worker thread to report back on.
     pub(super) fn proxy_sender(&self) -> Sender<ProxyEvent> {
         self.proxy_tx.clone()
-    }
-
-    /// Synchronously re-select a profile (`tsh login --proxy`). Used to restore
-    /// the root profile right after an all-clusters leaf login, before the next
-    /// cluster/status refresh - a fast, valid-cert re-key, so blocking the UI
-    /// briefly here is acceptable. Errors are non-fatal (the aggregate fan-out
-    /// restores root again at its end anyway).
-    fn restore_profile(&self, proxy: &str) {
-        let _ = self.repos.admin.select_cluster(proxy);
     }
 
     /// Drain all completed background proxy launches, non-blocking.

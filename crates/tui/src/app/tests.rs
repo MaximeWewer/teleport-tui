@@ -139,6 +139,9 @@ impl AdminRepository for FakeAdmin {
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
         Ok(vec![])
     }
+    fn select_cluster(&self, _cluster: &str) -> Result<(), DomainError> {
+        Ok(())
+    }
     fn generate_token(&self, token_type: &str) -> Result<GeneratedToken, DomainError> {
         Ok(GeneratedToken {
             token: "secret-token-value".to_owned(),
@@ -593,6 +596,90 @@ fn scoped_admin_rekeys_selected_cluster_then_restores_root() {
     );
     // The listing still lands (one user).
     assert_eq!(app.visible.len(), 1);
+}
+
+/// Admin whose profile switch to `fails` errors; counts `list_users` calls to
+/// prove a failed switch never runs the listing against the wrong cluster.
+#[derive(Debug)]
+struct FailingSelectAdmin {
+    fails: &'static str,
+    listed: std::sync::Arc<AtomicUsize>,
+}
+impl AdminRepository for FailingSelectAdmin {
+    fn list_users(&self) -> Result<Vec<AdminUser>, DomainError> {
+        self.listed.fetch_add(1, Ordering::SeqCst);
+        Ok(vec![AdminUser {
+            name: domain::value::ResourceName::try_from("alice").unwrap(),
+            roles: vec![],
+            labels: vec![],
+        }])
+    }
+    fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
+        Ok(vec![])
+    }
+    fn generate_token(&self, _t: &str) -> Result<GeneratedToken, DomainError> {
+        Err(DomainError::BinaryNotFound)
+    }
+    fn select_cluster(&self, proxy: &str) -> Result<(), DomainError> {
+        if proxy == self.fails {
+            Err(DomainError::Backend {
+                code: "TSH_EXEC_FAILED",
+                detail: "connection refused".to_owned(),
+            })
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[test]
+fn scoped_admin_does_not_list_when_the_cluster_switch_fails() {
+    let listed = std::sync::Arc::new(AtomicUsize::new(0));
+    let mut app = test_app_with_admin(Box::new(FailingSelectAdmin {
+        fails: "leaf.example",
+        listed: listed.clone(),
+    }));
+    app.topology
+        .as_mut()
+        .unwrap()
+        .select(&ClusterName::try_from("leaf.example").unwrap())
+        .unwrap();
+    listed.store(0, Ordering::SeqCst);
+
+    app.tab = Tab::Users;
+    app.reload_active();
+
+    // No `tctl` read on whatever cluster the profile was left on.
+    assert_eq!(listed.load(Ordering::SeqCst), 0);
+    assert!(app.visible.is_empty());
+    assert!(
+        app.status
+            .as_deref()
+            .unwrap_or("")
+            .contains("connection refused")
+    );
+}
+
+#[test]
+fn scoped_admin_surfaces_a_failed_root_restore() {
+    let listed = std::sync::Arc::new(AtomicUsize::new(0));
+    let mut app = test_app_with_admin(Box::new(FailingSelectAdmin {
+        fails: "root.example",
+        listed: listed.clone(),
+    }));
+    app.topology
+        .as_mut()
+        .unwrap()
+        .select(&ClusterName::try_from("leaf.example").unwrap())
+        .unwrap();
+
+    app.tab = Tab::Users;
+    app.reload_active();
+
+    // The leaf listing itself landed, but the stranded profile is reported.
+    assert_eq!(app.visible.len(), 1);
+    let status = app.status.as_deref().unwrap_or("");
+    assert!(status.contains("root.example"), "{status}");
 }
 
 #[test]

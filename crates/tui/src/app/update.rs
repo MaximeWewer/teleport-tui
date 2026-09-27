@@ -144,8 +144,20 @@ impl App {
             JobResult::AggregateAdmin { tab, cluster, rows } => {
                 self.apply_agg_cluster(seq, tab, &cluster, Some(rows));
             }
+            JobResult::RestoreFailed { root, error } => self.report_restore_failed(&root, &error),
             other => self.apply_tab(seq, other),
         }
+    }
+
+    /// Log a failed root-profile restore and say which profile is stranded: every
+    /// later `tsh`/`tctl` call reads the leaf until the user re-logs in.
+    fn report_restore_failed(&mut self, root: &str, error: &AppError) {
+        self.report(error);
+        self.status = Some(format!(
+            "[{}] could not switch the profile back to {root}: {}",
+            error.code(),
+            error.message()
+        ));
     }
 
     /// Apply one cluster's slice of an all-clusters fan-out. The rows are cached
@@ -215,6 +227,7 @@ impl App {
             // These variants are routed directly in `apply`; reaching here would
             // be a routing bug - degrade to a no-op load rather than panicking.
             | JobResult::Aggregate { .. }
+            | JobResult::RestoreFailed { .. }
             | JobResult::AggregateAdmin { .. } => (self.tab, Ok(0)),
         }
     }
@@ -417,7 +430,7 @@ impl App {
         self.visible.clear();
         self.table.select(None);
         let seq = self.tab_req;
-        if let Some((seq, result)) = self.dispatcher.spawn_admin_scoped(seq, job, cluster, root) {
+        for (seq, result) in self.dispatcher.spawn_admin_scoped(seq, job, cluster, root) {
             self.apply(seq, result);
         }
     }
