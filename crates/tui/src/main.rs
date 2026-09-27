@@ -137,7 +137,39 @@ fn real_main() -> Result<(), String> {
     run(&mut terminal, &mut application, refresh).map_err(|e| e.to_string())
 }
 
+/// Run the event loop, then - however it ended - stop the background proxy
+/// children that `App`'s drop can't reach: those still owned by a start-up
+/// worker thread, and those in launch results nobody will handle any more.
 fn run(terminal: &mut Tui, app: &mut App, refresh: Option<Duration>) -> io::Result<()> {
+    let result = event_loop(terminal, app, refresh);
+    proxy::shutdown();
+    for ev in app.drain_proxy_events() {
+        discard_proxy_event(ev);
+    }
+    result
+}
+
+/// Stop the child carried by a launch result that arrived too late to attach
+/// (dropping a std `Child` does not kill it).
+fn discard_proxy_event(ev: app::ProxyEvent) {
+    match ev {
+        app::ProxyEvent::AppReady {
+            result: Ok((mut child, _)),
+            ..
+        }
+        | app::ProxyEvent::KubeReady {
+            result: Ok((mut child, _)),
+            ..
+        }
+        | app::ProxyEvent::ForwardReady {
+            result: Ok(mut child),
+            ..
+        } => proxy::stop_child(&mut child),
+        _ => {}
+    }
+}
+
+fn event_loop(terminal: &mut Tui, app: &mut App, refresh: Option<Duration>) -> io::Result<()> {
     let mut last_refresh = Instant::now();
     // Redraw only when something changed (a key, a resize, an auto-refresh, or a
     // background result/spinner tick), instead of unconditionally every poll

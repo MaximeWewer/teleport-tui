@@ -9,7 +9,7 @@ use std::io::{self, BufRead, BufReader};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread::{self, sleep};
 use std::time::Duration;
 
@@ -67,7 +67,7 @@ fn start_listening_proxy(
         return match await_listen(&mut child, p) {
             Attempt::Ready(()) => Ok((child, p)),
             Attempt::PortLost => {
-                let _ = child.wait();
+                stop_child(&mut child);
                 Err(io::Error::new(
                     io::ErrorKind::AddrInUse,
                     "the requested local port is already in use",
@@ -87,7 +87,7 @@ fn start_listening_proxy(
             Attempt::Ready(()) => return Ok((child, port)),
             // Racey port: the child already exited - reap it and try another.
             Attempt::PortLost => {
-                let _ = child.wait();
+                stop_child(&mut child);
                 last = Some(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "proxy did not start (a free local port kept being taken)",
@@ -124,14 +124,13 @@ pub(crate) fn open_app(
     port: Option<u16>,
 ) -> io::Result<(Child, String)> {
     let (child, port) = start_listening_proxy(port, |p| {
-        own_group(
+        spawn_tracked(
             Command::new(tsh)
                 .args(["proxy", "app", name, "-c", cluster, "-p", &p.to_string()])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null()),
         )
-        .spawn()
     })?;
     let url = format!("http://127.0.0.1:{port}");
     open_browser(&url);
@@ -156,7 +155,7 @@ pub(crate) fn open_db(
     port: Option<u16>,
 ) -> io::Result<(Child, String)> {
     let (child, port) = start_listening_proxy(port, |p| {
-        own_group(
+        spawn_tracked(
             Command::new(tsh)
                 .args([
                     "proxy",
@@ -172,7 +171,6 @@ pub(crate) fn open_db(
                 .stdout(Stdio::null())
                 .stderr(Stdio::null()),
         )
-        .spawn()
     })?;
     Ok((child, format!("127.0.0.1:{port}")))
 }
@@ -236,8 +234,7 @@ fn kube_proxy_attempt(
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    own_group(&mut cmd);
-    let mut child = match cmd.spawn() {
+    let mut child = match spawn_tracked(&mut cmd) {
         Ok(c) => c,
         Err(e) => return Attempt::Failed(e),
     };
@@ -306,21 +303,27 @@ pub(crate) fn start_ssh_forward(
     } else {
         format!("{user}@{host}")
     };
-    let mut child = own_group(
+    let mut child = spawn_tracked(
         Command::new(tsh)
             .args(["ssh", "-c", cluster, "-L", spec, "-N", &target])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null()),
-    )
-    .spawn()?;
+    )?;
 
     let local = local_forward_port(spec);
     // ~4s: bail out the moment the child dies; otherwise confirm the local port
     // (when known) or fall through to "assumed up" after the grace period.
     for _ in 0..40 {
-        if child.try_wait()?.is_some() {
-            let _ = child.wait();
+        let exited = match child.try_wait() {
+            Ok(st) => st.is_some(),
+            Err(e) => {
+                stop_child(&mut child);
+                return Err(e);
+            }
+        };
+        if exited {
+            stop_child(&mut child);
             return Err(io::Error::other(
                 "forward exited immediately (not logged in / MFA required, or port in use)",
             ));
@@ -407,23 +410,108 @@ fn own_group(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
-/// Stop a background proxy child **and its whole process group**, then reap it.
-/// Because the child was spawned as its own group leader ([`own_group`]), a
-/// signal to the group (`kill(-pgid)`) also reaches any helper `tsh` forked, so
-/// nothing is orphaned. The direct `kill`/`wait` still run as a fallback (and to
-/// reap the leader). Off Unix, only the direct child is killed.
-pub(crate) fn stop_child(child: &mut Child) {
+/// Pids of the live background proxy children, each the leader of its own
+/// process group ([`own_group`]). A worker thread blocked in a start-up wait
+/// owns its `Child`, and quitting just abandons that thread (std's `Child` drop
+/// doesn't kill), so the event loop can't reach those children - this registry
+/// can: [`ChildRegistry::shutdown`] kills every group still listed.
+///
+/// A pid stays listed until [`stop_child`] reaps it, so it cannot have been
+/// recycled for an unrelated process when the shutdown signals it.
+#[derive(Debug)]
+struct ChildRegistry(Mutex<Tracked>);
+
+#[derive(Debug)]
+struct Tracked {
+    /// Set by [`ChildRegistry::shutdown`]: a worker still retrying after it
+    /// must not start a fresh child nobody would stop.
+    closed: bool,
+    pids: Vec<u32>,
+}
+
+impl ChildRegistry {
+    const fn new() -> Self {
+        Self(Mutex::new(Tracked {
+            closed: false,
+            pids: Vec::new(),
+        }))
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Tracked> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Spawn `cmd` in its own process group and list it. Spawning under the lock
+    /// means a concurrent [`Self::shutdown`] either sees the child or refuses it.
+    fn spawn(&self, cmd: &mut Command) -> io::Result<Child> {
+        let mut tracked = self.lock();
+        if tracked.closed {
+            return Err(io::Error::other("shutting down"));
+        }
+        let child = own_group(cmd).spawn()?;
+        tracked.pids.push(child.id());
+        Ok(child)
+    }
+
+    /// Drop `pid` from the list (the caller is about to reap it).
+    fn forget(&self, pid: u32) {
+        self.lock().pids.retain(|&p| p != pid);
+    }
+
+    /// Refuse further spawns and kill the process group of every listed child.
+    fn shutdown(&self) {
+        let mut tracked = self.lock();
+        tracked.closed = true;
+        for pid in tracked.pids.drain(..) {
+            kill_group(pid);
+        }
+    }
+}
+
+/// Every background proxy child of this process (see [`ChildRegistry`]).
+static CHILDREN: ChildRegistry = ChildRegistry::new();
+
+/// Spawn a background proxy child in its own process group, registered so
+/// [`shutdown`] can stop it even while a worker thread still holds it.
+fn spawn_tracked(cmd: &mut Command) -> io::Result<Child> {
+    CHILDREN.spawn(cmd)
+}
+
+/// Kill every background proxy child still running - including those owned by
+/// worker threads mid start-up - and refuse to start new ones. Called once as
+/// the TUI exits.
+pub(crate) fn shutdown() {
+    CHILDREN.shutdown();
+}
+
+/// SIGKILL the process group led by `pid`. Errors (already gone) are ignored.
+/// Off Unix there is no process-group signal without extra dependencies, so
+/// this is a no-op; the direct child is still killed by [`stop_child`].
+fn kill_group(pid: u32) {
     #[cfg(unix)]
     {
-        // The leader's pgid equals its pid; signal the group before reaping, while
-        // the pid is still valid. Errors (already gone) are ignored.
-        if let Some(pgid) = i32::try_from(child.id())
+        // The leader's pgid equals its pid.
+        if let Some(pgid) = i32::try_from(pid)
             .ok()
             .and_then(rustix::process::Pid::from_raw)
         {
             let _ = rustix::process::kill_process_group(pgid, rustix::process::Signal::KILL);
         }
     }
+    #[cfg(not(unix))]
+    let _ = pid;
+}
+
+/// Stop a background proxy child **and its whole process group**, then reap it.
+/// Because the child was spawned as its own group leader ([`own_group`]), a
+/// signal to the group (`kill(-pgid)`) also reaches any helper `tsh` forked, so
+/// nothing is orphaned. The direct `kill`/`wait` still run as a fallback (and to
+/// reap the leader). Off Unix, only the direct child is killed.
+pub(crate) fn stop_child(child: &mut Child) {
+    // Unlist first, so a concurrent shutdown never signals a reaped (recyclable)
+    // pid; signal the group before reaping, while the pid is still valid.
+    CHILDREN.forget(child.id());
+    kill_group(child.id());
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -535,6 +623,56 @@ mod tests {
             }
         });
         assert!(gone, "grandchild {gpid} should die with the group");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn registry_shutdown_kills_tracked_groups_and_refuses_new_spawns() {
+        use super::ChildRegistry;
+        use std::io::{BufRead, BufReader};
+        use std::path::Path;
+        use std::process::{Command, Stdio};
+        use std::thread::sleep;
+        use std::time::Duration;
+
+        // A local registry: shutting down the global one would break other tests.
+        let registry = ChildRegistry::new();
+        let mut child = registry
+            .spawn(
+                Command::new("sh")
+                    .args(["-c", "sleep 30 & echo $!; sleep 30"])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null()),
+            )
+            .expect("spawn sh");
+        let stdout = child.stdout.take().expect("stdout");
+        let mut line = String::new();
+        BufReader::new(stdout)
+            .read_line(&mut line)
+            .expect("read grandchild pid");
+        let gpid: u32 = line.trim().parse().expect("grandchild pid");
+        let alive = format!("/proc/{gpid}");
+        assert!(Path::new(&alive).exists(), "grandchild should start alive");
+
+        // As if a worker thread still held `child` when the TUI quit.
+        registry.shutdown();
+
+        let status = child.wait().expect("reap leader");
+        assert!(!status.success(), "leader should have been killed");
+        let gone = (0..100).any(|_| {
+            if Path::new(&alive).exists() {
+                sleep(Duration::from_millis(20));
+                false
+            } else {
+                true
+            }
+        });
+        assert!(gone, "grandchild {gpid} should die with the group");
+        assert!(
+            registry.spawn(&mut Command::new("true")).is_err(),
+            "no new child once shut down"
+        );
     }
 
     #[test]
