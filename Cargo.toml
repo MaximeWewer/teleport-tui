@@ -50,3 +50,7 @@ pedantic = { level = "warn", priority = -1 }
 [profile.release]
 strip = true
 lto = "thin"
+# One codegen unit: slower build, smaller and better-optimized binary.
+codegen-units = 1
+# `panic` stays at the default "unwind" on purpose: the Drop impls that kill
+# spawned tsh proxies/forwards and restore the terminal only run on unwind.
