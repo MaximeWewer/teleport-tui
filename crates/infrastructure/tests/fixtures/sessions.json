@@ -1,0 +1,43 @@
+[
+  {
+    "kind": "session_tracker",
+    "version": "v1",
+    "metadata": { "name": "cc0bb7fc-1111-2222-3333-444444444444", "expires": "2026-06-30T06:50:30Z" },
+    "spec": {
+      "session_id": "cc0bb7fc-1111-2222-3333-444444444444",
+      "kind": "ssh",
+      "state": 1,
+      "created": "2026-06-30T05:50:30Z",
+      "expires": "2026-06-30T06:50:30Z",
+      "address": "10.0.0.11:3022",
+      "cluster_name": "root",
+      "login": "admin",
+      "host_user": "alice",
+      "target_hostname": "node-01",
+      "target_address": "10.0.0.11:3022",
+      "host_roles": [{ "name": "ssp", "version": "v7" }],
+      "participants": [{ "id": "p1", "user": "alice", "mode": "peer", "last_active": "2026-06-30T05:51:00Z" }]
+    }
+  },
+  {
+    "kind": "session_tracker",
+    "version": "v1",
+    "metadata": { "name": "5e551011-aaaa-bbbb-cccc-dddddddddddd" },
+    "spec": {
+      "session_id": "5e551011-aaaa-bbbb-cccc-dddddddddddd",
+      "kind": "k8s",
+      "state": 1,
+      "created": "2026-06-30T06:02:10Z",
+      "cluster_name": "leaf.example.com",
+      "host_user": "bob@example.com",
+      "kubernetes_cluster": "prod-eks",
+      "participants": [{ "id": "p2", "user": "bob@example.com", "mode": "peer" }]
+    }
+  },
+  {
+    "kind": "session_tracker",
+    "version": "v1",
+    "metadata": { "name": "orphan" },
+    "spec": { "kind": "ssh", "state": 2 }
+  }
+]
