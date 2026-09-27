@@ -409,4 +409,117 @@ mod tests {
         f.cycle(true);
         assert_eq!(f.auth, Some(AuthMethod::Local));
     }
+
+    #[test]
+    fn wrap_step_wraps_both_ways_and_tolerates_empty() {
+        assert_eq!(wrap_step(0, 3, true), 1);
+        assert_eq!(wrap_step(2, 3, true), 0);
+        assert_eq!(wrap_step(0, 3, false), 2);
+        assert_eq!(wrap_step(0, 0, true), 0);
+        assert_eq!(wrap_step(5, 0, false), 0);
+    }
+
+    #[test]
+    fn field_cursor_wraps_and_skips_text_on_dropdowns() {
+        let mut f = SettingsForm::default();
+        f.prev_field();
+        assert_eq!(f.field, 8, "wraps back to the last row");
+        f.next_field();
+        assert_eq!(f.field, 0);
+        f.field = 5;
+        assert!(f.text_mut().is_none(), "auth is a dropdown");
+        f.field = 7;
+        assert!(f.numeric_field());
+        f.text_mut().unwrap().push('9');
+        assert_eq!(f.refresh, "9");
+    }
+
+    #[test]
+    fn toggles_only_flip_on_their_rows() {
+        let mut scp = ScpForm::default();
+        scp.toggle(); // row 0: direction
+        assert!(scp.download);
+        scp.field = 4;
+        scp.toggle();
+        assert!(scp.recursive);
+        scp.field = 2;
+        scp.toggle(); // a text row: no-op
+        assert!(scp.download && scp.recursive);
+
+        let mut ssh = SshOptionsForm::default();
+        ssh.toggle();
+        assert!(!ssh.tunnel_only, "row 0 is the login text field");
+        ssh.field = 2;
+        ssh.toggle();
+        assert!(ssh.tunnel_only);
+    }
+
+    #[test]
+    fn parse_field_reports_the_form_row() {
+        let ok: ClusterName = parse_field("leaf.example.com", "cluster").unwrap();
+        assert_eq!(ok.as_str(), "leaf.example.com");
+        let err = parse_field::<ClusterName>("-oProxyCommand=x", "cluster").unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::InvalidValue { field: "cluster" }
+        ));
+    }
+
+    #[test]
+    fn parse_opt_field_treats_blank_as_none_and_trims() {
+        assert_eq!(parse_opt_field::<Hostname>("  ", "host").unwrap(), None);
+        assert_eq!(
+            parse_opt_field::<Hostname>(" web-1 ", "host").unwrap(),
+            Some(Hostname::try_from("web-1").unwrap())
+        );
+        assert!(matches!(
+            parse_opt_field::<Hostname>("bad host", "host"),
+            Err(DomainError::InvalidValue { field: "host" })
+        ));
+    }
+
+    #[test]
+    fn valid_forward_accepts_specs_and_rejects_injection() {
+        for ok in [
+            "8080:db:5432",
+            "127.0.0.1:8080:db.internal:5432",
+            "[::1]:8080:db:5432",
+            "*:8080:db_1:5432",
+        ] {
+            assert!(valid_forward(ok), "{ok}");
+        }
+        let long = "1".repeat(257);
+        for bad in [
+            "",
+            "-oProxyCommand=x",
+            "8080:db:5432 -R 1:x:1",
+            "8080:db:5432;id",
+            "8080:db:5432\n",
+            "8080:$(id):5432",
+            long.as_str(),
+        ] {
+            assert!(!valid_forward(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn valid_command_allows_spaces_but_not_flags_or_control_chars() {
+        assert!(valid_command("ls -la /var/log | head"));
+        assert!(!valid_command(""));
+        assert!(!valid_command("--help"));
+        assert!(!valid_command("echo \x1b[2J"));
+        assert!(!valid_command("echo a\nrm -rf /"));
+        assert!(valid_command(&"a".repeat(4096)));
+        assert!(!valid_command(&"a".repeat(4097)));
+    }
+
+    #[test]
+    fn valid_path_allows_spaces_but_not_flags_or_control_chars() {
+        assert!(valid_path("/home/alice/My Documents/report.pdf"));
+        assert!(valid_path("./relative/dir"));
+        assert!(!valid_path(""));
+        assert!(!valid_path("-r"));
+        assert!(!valid_path("file\u{7}name"));
+        assert!(!valid_path(&"a".repeat(4097)));
+    }
 }
