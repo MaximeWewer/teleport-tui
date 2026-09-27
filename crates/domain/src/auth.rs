@@ -1,7 +1,9 @@
-//! `tsh login` options as closed value types: the authentication method
-//! (`--auth`) and the preferred MFA mode (`--mfa-mode`). Parsing is the single
-//! validation point, so a config typo or an unsupported value is caught where it
-//! is read instead of reaching `tsh` as a free string.
+//! `tsh login` options as closed value types.
+//!
+//! They are the authentication method (`--auth`) and the preferred MFA mode
+//! (`--mfa-mode`). Parsing is the single validation point, so a config typo or
+//! an unsupported value is caught where it is read instead of reaching `tsh` as
+//! a free string.
 
 use crate::error::DomainError;
 use crate::value::ResourceName;

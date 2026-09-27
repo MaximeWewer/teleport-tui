@@ -120,9 +120,11 @@ pub trait RequestRepository: std::fmt::Debug + Send + Sync {
     fn list_requests(&self, ctx: &ClusterContext) -> Result<Vec<AccessRequest>, DomainError>;
 }
 
-/// Administrative listings and the few admin writes (join tokens, user
-/// create/reset) via `tctl`, against the currently selected cluster. Secrets
-/// it returns (tokens, invite URLs) are for one-time display only.
+/// Administrative listings and the few admin writes via `tctl`.
+///
+/// The writes are join tokens and user create/reset; everything runs against
+/// the currently selected cluster. Secrets it returns (tokens, invite URLs) are
+/// for one-time display only.
 pub trait AdminRepository: std::fmt::Debug + Send + Sync {
     /// # Errors
     /// Returns [`DomainError`] (e.g. `TSH_NOT_FOUND`, insufficient privileges).

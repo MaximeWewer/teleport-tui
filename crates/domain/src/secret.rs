@@ -1,9 +1,12 @@
-//! A dependency-free secret string. Domain stays dependency-free, so it can't
-//! use the `zeroize` crate the outer layers rely on; [`SecretString`] is the
-//! minimal equivalent for secrets that live inside domain entities.
+//! A dependency-free secret string.
+//!
+//! Domain stays dependency-free, so it can't use the `zeroize` crate the outer
+//! layers rely on; [`SecretString`] is the minimal equivalent for secrets that
+//! live inside domain entities.
 
-/// A secret string: masked `Debug`, no `Display`, and its buffer is wiped
-/// (best effort, in safe code) when dropped. Read it with
+/// A secret string: masked `Debug`, no `Display`, wiped on drop.
+///
+/// The buffer wipe is best effort, in safe code. Read it with
 /// [`SecretString::expose`] only where the raw value is really needed (an argv
 /// element, a one-time display), never to log it.
 ///

@@ -31,11 +31,13 @@ pub fn redact_command(input: &str) -> String {
     mask_tokens(&redact_text(input), false)
 }
 
-/// Strip control characters and mask secrets in free-text output (e.g. an error
-/// message or `tsh` stderr that might echo a supplied secret). In addition to
-/// the flag-based masking of [`redact_command`], this masks any standalone
-/// high-entropy token-shaped word. Over-redaction is acceptable here - this
-/// text only ever goes to the NDJSON log, never back to the CLI.
+/// Strip control characters and mask secrets in free-text output.
+///
+/// Meant for e.g. an error message or `tsh` stderr that might echo a supplied
+/// secret. In addition to the flag-based masking of [`redact_command`], this
+/// masks any standalone high-entropy token-shaped word. Over-redaction is
+/// acceptable here - this text only ever goes to the NDJSON log, never back to
+/// the CLI.
 #[must_use]
 pub fn redact_message(input: &str) -> String {
     mask_tokens(&redact_text(input), true)

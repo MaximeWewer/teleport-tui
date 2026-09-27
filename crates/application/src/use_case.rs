@@ -1,7 +1,9 @@
-//! Use cases - one type per business intention. Each holds a port (injected as
-//! a trait object) and orchestrates the domain. No business rules, no I/O here.
-//! Failures are the domain's own [`DomainError`] vocabulary: this layer adds no
-//! error cases of its own, so it does not wrap them.
+//! Use cases - one type per business intention.
+//!
+//! Each holds a port (injected as a trait object) and orchestrates the domain.
+//! No business rules, no I/O here. Failures are the domain's own
+//! [`DomainError`] vocabulary: this layer adds no error cases of its own, so it
+//! does not wrap them.
 
 use domain::admin::{
     AdminRole, AdminUser, Bot, GeneratedToken, Instance, InviteLink, ProvisionToken,

@@ -1,6 +1,8 @@
-//! `tsh` capability probe: parses `tsh help` once to learn which top-level
-//! commands the installed binary supports. Runtime detection - an old `tsh`
-//! exposes fewer commands than a recent one, regardless of the host OS.
+//! `tsh` capability probe.
+//!
+//! Parses `tsh help` once to learn which top-level commands the installed
+//! binary supports. Runtime detection - an old `tsh` exposes fewer commands
+//! than a recent one, regardless of the host OS.
 
 use std::path::PathBuf;
 

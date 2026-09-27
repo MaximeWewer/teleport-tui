@@ -1,7 +1,8 @@
-//! Pure builders for the `tsh` argv vectors the TUI runs itself: the
-//! *interactive* commands it hands the terminal to (login, ssh, db connect, scp,
-//! requests, logout) and the *background* local proxies / forwards it spawns
-//! (`tsh proxy app|db|kube`, `tsh ssh -L … -N`).
+//! Pure builders for the `tsh` argv vectors the TUI runs itself.
+//!
+//! They cover the *interactive* commands it hands the terminal to (login, ssh,
+//! db connect, scp, requests, logout) and the *background* local proxies /
+//! forwards it spawns (`tsh proxy app|db|kube`, `tsh ssh -L … -N`).
 //!
 //! These live in the application layer, not infrastructure: they perform **no
 //! I/O** - they only assemble the argv; the presentation layer hands it to the
@@ -148,9 +149,10 @@ pub fn scp(
     args
 }
 
-/// `tsh db login --cluster=<cluster> [--db-user=<user>] <name>` - retrieve a database
-/// certificate (no interactive shell; the cert lands in `~/.tsh`). No
-/// `db_user` lets tsh use the database's own default user.
+/// `tsh db login --cluster=<cluster> [--db-user=<user>] <name>`.
+///
+/// Retrieves a database certificate (no interactive shell; the cert lands in
+/// `~/.tsh`). No `db_user` lets tsh use the database's own default user.
 #[must_use]
 pub fn db_login(
     cluster: &ClusterName,
@@ -214,11 +216,12 @@ pub fn kube_login(cluster: &ClusterName, kube: &ResourceName) -> Vec<String> {
     ]
 }
 
-/// `tsh kube exec [--container=…] [--namespace=…] -- <pod> <command…>` - run a
-/// command in a pod of the *current* kube context (set by [`kube_login`]). The
-/// `--` ends flag parsing so a command with leading-dash args is passed through
-/// verbatim. `command` is the already-tokenised argv. An absent container/
-/// namespace omits its flag.
+/// `tsh kube exec [--container=…] [--namespace=…] -- <pod> <command…>`.
+///
+/// Runs a command in a pod of the *current* kube context (set by
+/// [`kube_login`]). The `--` ends flag parsing so a command with leading-dash
+/// args is passed through verbatim. `command` is the already-tokenised argv. An
+/// absent container/namespace omits its flag.
 #[must_use]
 pub fn kube_exec(
     pod: &Identifier,

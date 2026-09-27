@@ -1,17 +1,21 @@
-//! Administrative resources surfaced via `tctl` (users, roles, join tokens,
-//! bots, inventory). Generic resource editing is out of scope; the only writes
-//! are join-token generation/removal and user creation/reset (invite links).
+//! Administrative resources surfaced via `tctl`.
+//!
+//! Covers users, roles, join tokens, bots and inventory. Generic resource
+//! editing is out of scope; the only writes are join-token generation/removal
+//! and user creation/reset (invite links).
 
 use crate::resource::{Resource, label_list};
 use crate::secret::SecretString;
 use crate::value::ResourceName;
 
-/// A freshly generated join token (`tctl tokens add`). The `token` field is a
-/// **secret**: it is shown once in the UI and must never be logged. It is a
-/// [`SecretString`] (wiped on drop, even on a path that drops it unshown) and
-/// `Debug` is hand-written to mask it, so the guarantee is structural - a stray
-/// `{:?}` (a log line, a panic message on an unwrapped `Result<GeneratedToken>`)
-/// can't leak the token, regardless of caller discipline.
+/// A freshly generated join token (`tctl tokens add`).
+///
+/// The `token` field is a **secret**: it is shown once in the UI and must never
+/// be logged. It is a [`SecretString`] (wiped on drop, even on a path that
+/// drops it unshown) and `Debug` is hand-written to mask it, so the guarantee
+/// is structural - a stray `{:?}` (a log line, a panic message on an unwrapped
+/// `Result<GeneratedToken>`) can't leak the token, regardless of caller
+/// discipline.
 #[derive(Clone, PartialEq, Eq)]
 pub struct GeneratedToken {
     pub token: SecretString,
@@ -31,9 +35,11 @@ impl core::fmt::Debug for GeneratedToken {
     }
 }
 
-/// A one-time account-setup URL from `tctl users add` / `tctl users reset`. The
-/// `url` embeds a secret invitation token - show once, never log. It is a
-/// [`SecretString`] (wiped on drop) and `Debug` masks it (see [`GeneratedToken`]).
+/// A one-time account-setup URL from `tctl users add` / `tctl users reset`.
+///
+/// The `url` embeds a secret invitation token - show once, never log. It is a
+/// [`SecretString`] (wiped on drop) and `Debug` masks it (see
+/// [`GeneratedToken`]).
 #[derive(Clone, PartialEq, Eq)]
 pub struct InviteLink {
     pub user: String,
@@ -49,12 +55,14 @@ impl core::fmt::Debug for InviteLink {
     }
 }
 
-/// An existing provision (join) token from `tctl tokens ls`. For the `token`
-/// join method (the default, also used when `join_method` is empty) the token's
-/// *name* IS the secret a node presents to join, so it is held in a
-/// [`SecretString`] (masked `Debug`, wiped on drop) and shown masked in the
-/// table and detail views. Other join methods (`iam`, `github`, …) authenticate
-/// by a signed identity, so their name is a plain identifier and shown as is.
+/// An existing provision (join) token from `tctl tokens ls`.
+///
+/// For the `token` join method (the default, also used when `join_method` is
+/// empty) the token's *name* IS the secret a node presents to join, so it is
+/// held in a [`SecretString`] (masked `Debug`, wiped on drop) and shown masked
+/// in the table and detail views. Other join methods (`iam`, `github`, …)
+/// authenticate by a signed identity, so their name is a plain identifier and
+/// shown as is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionToken {
     pub name: SecretString,

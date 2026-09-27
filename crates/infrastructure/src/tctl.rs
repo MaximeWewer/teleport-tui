@@ -1,9 +1,11 @@
-//! `tctl` adapter: admin listings (`tctl get users|roles`, `tokens ls`,
-//! `bots ls`, `inventory ls`), the `tctl status` admin probe, and a few
-//! targeted writes: `users add` / `users reset` (invite links), `tokens add`
-//! and `tokens rm`. `tctl` always targets the *currently logged-in* proxy (it
-//! has no cluster flag), so the all-clusters admin view re-selects each cluster
-//! via [`select_cluster`] (`tsh login <cluster>`, on the auth gateway) before
+//! `tctl` adapter for admin listings, the admin probe and a few writes.
+//!
+//! Listings are `tctl get users|roles`, `tokens ls`, `bots ls` and
+//! `inventory ls`; the probe is `tctl status`; the targeted writes are
+//! `users add` / `users reset` (invite links), `tokens add` and `tokens rm`.
+//! `tctl` always targets the *currently logged-in* proxy (it has no cluster
+//! flag), so the all-clusters admin view re-selects each cluster via
+//! [`select_cluster`] (`tsh login <cluster>`, on the auth gateway) before
 //! listing. Commands whose stdout carries a secret (`tokens add`, the invite
 //! URL of `users add|reset`) are captured into zeroizing buffers, parsed for
 //! one-time display and never logged; on failure only the redacted stderr is
