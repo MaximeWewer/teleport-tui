@@ -264,7 +264,7 @@ pub struct ConfigFileStore {
 
 impl ConfigFileStore {
     #[must_use]
-    pub fn new(path: PathBuf) -> Self {
+    pub const fn new(path: PathBuf) -> Self {
         Self { path }
     }
 

@@ -73,7 +73,7 @@ pub struct TctlAdminRepository<R: CommandRunner> {
 }
 
 impl<R: CommandRunner> TctlAdminRepository<R> {
-    pub fn new(runner: R, tctl: PathBuf) -> Self {
+    pub const fn new(runner: R, tctl: PathBuf) -> Self {
         Self { runner, tctl }
     }
 

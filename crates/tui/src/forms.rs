@@ -30,7 +30,7 @@ impl LoginForm {
 
     /// Mutable handle to the focused TEXT field (proxy/user). Returns `None` for
     /// the dropdown fields (auth/mfa), which are cycled, not typed.
-    pub(crate) fn text_mut(&mut self) -> Option<&mut String> {
+    pub(crate) const fn text_mut(&mut self) -> Option<&mut String> {
         match self.field {
             0 => Some(&mut self.proxy),
             1 => Some(&mut self.user),
@@ -38,11 +38,11 @@ impl LoginForm {
         }
     }
 
-    pub(crate) fn next_field(&mut self) {
+    pub(crate) const fn next_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, true);
     }
 
-    pub(crate) fn prev_field(&mut self) {
+    pub(crate) const fn prev_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, false);
     }
 
@@ -95,7 +95,7 @@ impl ScpForm {
 
     /// Mutable handle to the focused TEXT field; `None` for the toggle rows
     /// (direction/recursive), which are flipped with ←/→ instead of typed.
-    pub(crate) fn text_mut(&mut self) -> Option<&mut String> {
+    pub(crate) const fn text_mut(&mut self) -> Option<&mut String> {
         match self.field {
             1 => Some(&mut self.login),
             2 => Some(&mut self.remote),
@@ -104,16 +104,16 @@ impl ScpForm {
         }
     }
 
-    pub(crate) fn next_field(&mut self) {
+    pub(crate) const fn next_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, true);
     }
 
-    pub(crate) fn prev_field(&mut self) {
+    pub(crate) const fn prev_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, false);
     }
 
     /// Flip the focused toggle (direction/recursive). No-op on text rows.
-    pub(crate) fn toggle(&mut self) {
+    pub(crate) const fn toggle(&mut self) {
         match self.field {
             0 => self.download = !self.download,
             4 => self.recursive = !self.recursive,
@@ -170,7 +170,7 @@ impl SettingsForm {
     // Rows: 0 ssh, 1 kube, 2 db, 3 proxy, 4 user, 5 auth, 6 mfa, 7 refresh, 8 tools.
     const FIELDS: usize = 9;
 
-    pub(crate) fn text_mut(&mut self) -> Option<&mut String> {
+    pub(crate) const fn text_mut(&mut self) -> Option<&mut String> {
         match self.field {
             0 => Some(&mut self.ssh_login),
             1 => Some(&mut self.kube_user),
@@ -188,11 +188,11 @@ impl SettingsForm {
         self.field == 7
     }
 
-    pub(crate) fn next_field(&mut self) {
+    pub(crate) const fn next_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, true);
     }
 
-    pub(crate) fn prev_field(&mut self) {
+    pub(crate) const fn prev_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, false);
     }
 
@@ -224,7 +224,7 @@ pub(crate) struct AddUserForm {
 impl AddUserForm {
     const FIELDS: usize = 2;
 
-    pub(crate) fn text_mut(&mut self) -> Option<&mut String> {
+    pub(crate) const fn text_mut(&mut self) -> Option<&mut String> {
         match self.field {
             0 => Some(&mut self.username),
             1 => Some(&mut self.roles),
@@ -232,11 +232,11 @@ impl AddUserForm {
         }
     }
 
-    pub(crate) fn next_field(&mut self) {
+    pub(crate) const fn next_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, true);
     }
 
-    pub(crate) fn prev_field(&mut self) {
+    pub(crate) const fn prev_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, false);
     }
 }
@@ -260,7 +260,7 @@ impl SshOptionsForm {
     // Rows: 0 login, 1 forward, 2 tunnel-only (toggle), 3 command.
     const FIELDS: usize = 4;
 
-    pub(crate) fn text_mut(&mut self) -> Option<&mut String> {
+    pub(crate) const fn text_mut(&mut self) -> Option<&mut String> {
         match self.field {
             0 => Some(&mut self.login),
             1 => Some(&mut self.forward),
@@ -269,16 +269,16 @@ impl SshOptionsForm {
         }
     }
 
-    pub(crate) fn next_field(&mut self) {
+    pub(crate) const fn next_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, true);
     }
 
-    pub(crate) fn prev_field(&mut self) {
+    pub(crate) const fn prev_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, false);
     }
 
     /// Flip the tunnel-only toggle. No-op on the text rows.
-    pub(crate) fn toggle(&mut self) {
+    pub(crate) const fn toggle(&mut self) {
         if self.field == 2 {
             self.tunnel_only = !self.tunnel_only;
         }
@@ -299,7 +299,7 @@ pub(crate) struct KubeExecForm {
 impl KubeExecForm {
     const FIELDS: usize = 4;
 
-    pub(crate) fn text_mut(&mut self) -> Option<&mut String> {
+    pub(crate) const fn text_mut(&mut self) -> Option<&mut String> {
         match self.field {
             0 => Some(&mut self.pod),
             1 => Some(&mut self.command),
@@ -309,11 +309,11 @@ impl KubeExecForm {
         }
     }
 
-    pub(crate) fn next_field(&mut self) {
+    pub(crate) const fn next_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, true);
     }
 
-    pub(crate) fn prev_field(&mut self) {
+    pub(crate) const fn prev_field(&mut self) {
         self.field = wrap_step(self.field, Self::FIELDS, false);
     }
 }

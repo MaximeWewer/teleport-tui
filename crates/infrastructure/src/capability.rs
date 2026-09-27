@@ -16,7 +16,7 @@ pub struct TshCapabilityProbe<R: CommandRunner> {
 }
 
 impl<R: CommandRunner> TshCapabilityProbe<R> {
-    pub fn new(runner: R, tsh: PathBuf) -> Self {
+    pub const fn new(runner: R, tsh: PathBuf) -> Self {
         Self { runner, tsh }
     }
 }

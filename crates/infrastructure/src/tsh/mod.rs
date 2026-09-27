@@ -140,7 +140,7 @@ macro_rules! tsh_adapter {
         }
 
         impl<R: $crate::process::CommandRunner> $name<R> {
-            pub fn new(runner: R, tsh: ::std::path::PathBuf) -> Self {
+            pub const fn new(runner: R, tsh: ::std::path::PathBuf) -> Self {
                 Self {
                     cli: $crate::tsh::TshCli { runner, tsh },
                 }

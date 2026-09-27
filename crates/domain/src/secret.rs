@@ -16,7 +16,7 @@ pub struct SecretString(String);
 
 impl SecretString {
     #[must_use]
-    pub fn new(value: String) -> Self {
+    pub const fn new(value: String) -> Self {
         Self(value)
     }
 

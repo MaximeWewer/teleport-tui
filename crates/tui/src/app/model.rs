@@ -327,7 +327,7 @@ pub(crate) struct AppProxy {
 }
 
 impl AppProxy {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         child: std::process::Child,
         name: String,
         url: String,
@@ -362,7 +362,7 @@ pub(crate) struct Forward {
 }
 
 impl Forward {
-    pub(crate) fn new(
+    pub(crate) const fn new(
         child: std::process::Child,
         spec: String,
         target: String,
