@@ -45,8 +45,13 @@ fn parse_databases(stdout: &str) -> Result<Vec<Database>, DomainError> {
     })?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
+        // Skip (don't fail on) a row whose name we refuse: one odd entry must
+        // not blank the whole list.
+        let Ok(name) = ResourceName::try_from(dto.metadata.name) else {
+            continue;
+        };
         out.push(Database {
-            name: ResourceName::try_from(dto.metadata.name)?,
+            name,
             protocol: dto.spec.protocol,
             uri: dto.spec.uri,
             labels: sorted_labels(dto.metadata.labels),
@@ -64,5 +69,15 @@ mod tests {
         assert_eq!(dbs.len(), 2);
         assert_eq!(dbs[0].protocol, "postgres");
         assert!(dbs[1].labels.is_empty());
+    }
+
+    #[test]
+    fn skips_databases_with_invalid_names() {
+        let dbs = parse_databases(
+            r#"[{"metadata":{"name":"-x"},"spec":{}},{"metadata":{"name":"pg"},"spec":{}}]"#,
+        )
+        .unwrap();
+        assert_eq!(dbs.len(), 1);
+        assert_eq!(dbs[0].name.as_str(), "pg");
     }
 }

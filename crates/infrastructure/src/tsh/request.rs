@@ -58,8 +58,13 @@ fn parse_requests(stdout: &str) -> Result<Vec<AccessRequest>, DomainError> {
         })?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
+        // Skip (don't fail on) a row whose id we refuse: one odd entry must not
+        // blank the whole list.
+        let Ok(id) = RequestId::try_from(dto.metadata.name) else {
+            continue;
+        };
         out.push(AccessRequest {
-            id: RequestId::try_from(dto.metadata.name)?,
+            id,
             user: dto.spec.user,
             roles: dto.spec.roles,
             state: RequestState::from_code(dto.spec.state),
@@ -81,5 +86,15 @@ mod tests {
         assert!(reqs[0].state.is_pending());
         assert_eq!(reqs[0].roles.len(), 2);
         assert_eq!(reqs[1].state, RequestState::Approved);
+    }
+
+    #[test]
+    fn skips_requests_with_invalid_ids() {
+        let reqs = parse_requests(
+            r#"[{"metadata":{"name":"-x"},"spec":{}},{"metadata":{"name":"abc-123"},"spec":{}}]"#,
+        )
+        .unwrap();
+        assert_eq!(reqs.len(), 1);
+        assert_eq!(reqs[0].id.as_str(), "abc-123");
     }
 }

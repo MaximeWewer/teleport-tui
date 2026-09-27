@@ -38,8 +38,13 @@ fn parse_kube(stdout: &str) -> Result<Vec<KubeCluster>, DomainError> {
     })?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
+        // Skip (don't fail on) a row whose name we refuse: one odd entry must
+        // not blank the whole list.
+        let Ok(name) = ResourceName::try_from(dto.kube_cluster_name) else {
+            continue;
+        };
         out.push(KubeCluster {
-            name: ResourceName::try_from(dto.kube_cluster_name)?,
+            name,
             labels: sorted_labels(dto.labels),
         });
     }
@@ -54,5 +59,13 @@ mod tests {
         let kube = parse_kube(include_str!("../../tests/fixtures/kube.json")).unwrap();
         assert_eq!(kube.len(), 1);
         assert_eq!(kube[0].name.as_str(), "kube-cluster-demo");
+    }
+
+    #[test]
+    fn skips_kube_clusters_with_invalid_names() {
+        let kube =
+            parse_kube(r#"[{"kube_cluster_name":"-x"},{"kube_cluster_name":"prod"}]"#).unwrap();
+        assert_eq!(kube.len(), 1);
+        assert_eq!(kube[0].name.as_str(), "prod");
     }
 }

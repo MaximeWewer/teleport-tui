@@ -45,8 +45,13 @@ fn parse_apps(stdout: &str) -> Result<Vec<App>, DomainError> {
     })?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
+        // Skip (don't fail on) a row whose name we refuse: one odd entry must
+        // not blank the whole list.
+        let Ok(name) = ResourceName::try_from(dto.metadata.name) else {
+            continue;
+        };
         out.push(App {
-            name: ResourceName::try_from(dto.metadata.name)?,
+            name,
             uri: dto.spec.uri,
             public_addr: dto.spec.public_addr,
             labels: sorted_labels(dto.metadata.labels),
@@ -63,5 +68,15 @@ mod tests {
         let apps = parse_apps(include_str!("../../tests/fixtures/apps.json")).unwrap();
         assert_eq!(apps.len(), 2);
         assert!(!apps[0].public_addr.is_empty());
+    }
+
+    #[test]
+    fn skips_apps_with_invalid_names() {
+        let apps = parse_apps(
+            r#"[{"metadata":{"name":"-x"},"spec":{}},{"metadata":{"name":"grafana"},"spec":{}}]"#,
+        )
+        .unwrap();
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].name.as_str(), "grafana");
     }
 }

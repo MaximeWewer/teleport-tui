@@ -67,7 +67,11 @@ fn parse_nodes(stdout: &str) -> Result<Vec<SshNode>, DomainError> {
     })?;
     let mut nodes = Vec::with_capacity(dtos.len());
     for dto in dtos {
-        let hostname = Hostname::try_from(dto.spec.hostname)?;
+        // One row with a hostname we refuse (e.g. a leading `-`) is skipped, not
+        // fatal: it must not blank the whole list.
+        let Ok(hostname) = Hostname::try_from(dto.spec.hostname) else {
+            continue;
+        };
         let mut labels: Vec<(String, String)> = dto
             .metadata
             .labels
@@ -95,5 +99,17 @@ mod tests {
         assert_eq!(nodes.len(), 2);
         assert!(!nodes[0].hostname.as_str().is_empty());
         assert!(nodes[0].matches("linux") || nodes[1].matches("linux"));
+    }
+
+    #[test]
+    fn skips_nodes_with_invalid_hostnames() {
+        let nodes = parse_nodes(
+            r#"[{"metadata":{"name":"a"},"spec":{"hostname":"-x"}},
+                {"metadata":{"name":"b"},"spec":{"hostname":"_x"}},
+                {"metadata":{"name":"c"},"spec":{"hostname":"web-01"}}]"#,
+        )
+        .unwrap();
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].hostname.as_str(), "web-01");
     }
 }

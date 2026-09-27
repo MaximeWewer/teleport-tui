@@ -371,8 +371,13 @@ fn parse_bots(stdout: &str) -> Result<Vec<Bot>, DomainError> {
     })?;
     let mut out = Vec::with_capacity(dtos.len());
     for d in dtos {
+        // Skip (don't fail on) a row whose name we refuse: one odd entry must
+        // not blank the whole list.
+        let Ok(name) = ResourceName::try_from(d.metadata.name) else {
+            continue;
+        };
         out.push(Bot {
-            name: ResourceName::try_from(d.metadata.name)?,
+            name,
             roles: d.spec.roles,
             user: d.status.user_name,
             max_ttl_secs: d.spec.max_session_ttl.seconds,
@@ -464,8 +469,13 @@ fn parse_users(stdout: &str) -> Result<Vec<AdminUser>, DomainError> {
     })?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
+        // Skip (don't fail on) a row whose name we refuse: one odd entry must
+        // not blank the whole list.
+        let Ok(name) = ResourceName::try_from(dto.metadata.name) else {
+            continue;
+        };
         out.push(AdminUser {
-            name: ResourceName::try_from(dto.metadata.name)?,
+            name,
             roles: dto.spec.roles,
             labels: sorted_labels(dto.metadata.labels),
         });
@@ -479,8 +489,13 @@ fn parse_roles(stdout: &str) -> Result<Vec<AdminRole>, DomainError> {
     })?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
+        // Skip (don't fail on) a row whose name we refuse: one odd entry must
+        // not blank the whole list.
+        let Ok(name) = ResourceName::try_from(dto.metadata.name) else {
+            continue;
+        };
         out.push(AdminRole {
-            name: ResourceName::try_from(dto.metadata.name)?,
+            name,
             description: dto.metadata.description,
             labels: sorted_labels(dto.metadata.labels),
         });
@@ -597,6 +612,27 @@ mod tests {
         let users = parse_users(include_str!("../tests/fixtures/users.json")).unwrap();
         assert_eq!(users.len(), 2);
         assert!(!users[0].roles.is_empty());
+    }
+
+    #[test]
+    fn skips_invalid_rows_instead_of_failing_the_list() {
+        let users = parse_users(
+            r#"[{"metadata":{"name":"-x"},"spec":{"roles":["access"]}},
+                {"metadata":{"name":"alice"},"spec":{"roles":["access"]}}]"#,
+        )
+        .unwrap();
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].name.as_str(), "alice");
+        let roles =
+            parse_roles(r#"[{"metadata":{"name":"bad name"}},{"metadata":{"name":"editor"}}]"#)
+                .unwrap();
+        assert_eq!(roles.len(), 1);
+        let bots = parse_bots(
+            r#"[{"metadata":{"name":"-bot"},"spec":{},"status":{}},
+                {"metadata":{"name":"ci"},"spec":{},"status":{}}]"#,
+        )
+        .unwrap();
+        assert_eq!(bots.len(), 1);
     }
 
     #[test]
