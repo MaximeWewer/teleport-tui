@@ -141,40 +141,17 @@ impl App {
     fn on_key_normal(&mut self, key: KeyEvent) -> Outcome {
         let ctrl_c =
             key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c');
+        if ctrl_c || matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
+            return Outcome::Quit;
+        }
+        if let Some(tab) = self.tab_for_key(key.code) {
+            self.switch_tab(tab);
+            return Outcome::Continue;
+        }
+        if let Some(outcome) = self.on_key_tab_action(key.code) {
+            return outcome;
+        }
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => return Outcome::Quit,
-            _ if ctrl_c => return Outcome::Quit,
-            KeyCode::Tab => self.switch_tab(self.next_visible_tab(true)),
-            KeyCode::BackTab => self.switch_tab(self.next_visible_tab(false)),
-            // Number keys jump to a tab only when it's visible (capability +
-            // rights). An unsupported/hidden tab key is a no-op.
-            KeyCode::Char('1') => self.switch_tab(Tab::Ssh),
-            KeyCode::Char('2') if self.tab_visible(Tab::Kube) => self.switch_tab(Tab::Kube),
-            KeyCode::Char('3') if self.tab_visible(Tab::Db) => self.switch_tab(Tab::Db),
-            KeyCode::Char('4') if self.tab_visible(Tab::Apps) => self.switch_tab(Tab::Apps),
-            KeyCode::Char('5') if self.tab_visible(Tab::Users) => self.switch_tab(Tab::Users),
-            KeyCode::Char('6') if self.tab_visible(Tab::Roles) => self.switch_tab(Tab::Roles),
-            KeyCode::Char('7') if self.tab_visible(Tab::Requests) => self.switch_tab(Tab::Requests),
-            KeyCode::Char('8') if self.tab_visible(Tab::Tokens) => self.switch_tab(Tab::Tokens),
-            KeyCode::Char('9') if self.tab_visible(Tab::Bots) => self.switch_tab(Tab::Bots),
-            KeyCode::Char('0') if self.tab_visible(Tab::Inventory) => {
-                self.switch_tab(Tab::Inventory);
-            }
-            // Token generation lives only on the Tokens tab.
-            KeyCode::Char('g') if self.tab == Tab::Tokens => {
-                self.mode = Mode::CreateToken;
-                self.input.clear();
-            }
-            // Users tab: create a user (form) or reset the selected user.
-            KeyCode::Char('n') if self.tab == Tab::Users => {
-                self.add_user_form = AddUserForm::default();
-                self.mode = Mode::AddUser;
-            }
-            KeyCode::Char('R') if self.tab == Tab::Users => {
-                if let Some(name) = self.selected_user_name() {
-                    self.mode = Mode::ConfirmUserReset(name);
-                }
-            }
             // Show this user's MFA devices (tsh, any logged-in user).
             KeyCode::Char('M') if self.profile.is_some() && self.caps.supports("mfa") => {
                 self.status = Some("loading MFA devices…".to_owned());
@@ -193,66 +170,119 @@ impl App {
             KeyCode::Char('?') => self.mode = Mode::Help,
             // Active background SSH forwards popup (stop them here).
             KeyCode::Char('F') => self.open_forwards(),
-            KeyCode::Char('a') if self.tab == Tab::Requests => return self.review_selected(true),
-            KeyCode::Char('d') if self.tab == Tab::Requests => return self.review_selected(false),
-            KeyCode::Char('D') if self.tab == Tab::Requests => return self.drop_selected(),
-            KeyCode::Char('n') if self.tab == Tab::Requests => {
-                self.mode = Mode::CreateRequest;
-                self.input.clear();
-            }
-            // Tokens tab: remove the selected token (`tctl tokens rm <name>`).
-            KeyCode::Char('d') if self.tab == Tab::Tokens && self.selected_index().is_some() => {
-                self.mode = Mode::ConfirmTokenRm;
-            }
-            // SCP file transfer for the selected SSH node (needs `tsh scp`).
-            KeyCode::Char('s') if self.tab == Tab::Ssh && self.caps.supports("scp") => {
-                self.open_scp_form();
-            }
-            // SSH options (forward / tunnel / one-off command) for the selected node.
-            KeyCode::Char('o') if self.tab == Tab::Ssh => self.open_ssh_options_form(),
-            // Background `tsh proxy db` tunnel for a GUI client (Db tab).
-            KeyCode::Char('P') if self.tab == Tab::Db => return self.db_proxy_selected(),
-            // Certificate lifecycle (`l` login / `u` logout) on Db and Apps.
-            KeyCode::Char('l') if self.tab == Tab::Db => return self.db_login_selected(),
-            KeyCode::Char('u') if self.tab == Tab::Db => return self.db_logout_selected(),
-            KeyCode::Char('l') if self.tab == Tab::Apps => return self.app_login_selected(),
-            KeyCode::Char('u') if self.tab == Tab::Apps => return self.app_logout_selected(),
-            // `tsh kube exec` a command in a pod (Kube tab).
-            KeyCode::Char('e') if self.tab == Tab::Kube => self.open_kube_exec_form(),
             KeyCode::Char('j') | KeyCode::Down => self.move_selection(true),
             KeyCode::Char('k') | KeyCode::Up => self.move_selection(false),
             KeyCode::Char('r') => self.force_reload(),
-            KeyCode::Char('/') => {
-                self.mode = Mode::Search;
-                self.input.clear();
-            }
-            KeyCode::Char('c') => {
-                // The picker lists the topology; without it (clusters not loaded
-                // yet, or `tsh clusters` failed - e.g. an expired session) there's
-                // nothing to show, so give feedback instead of entering an empty,
-                // invisible Picker mode.
-                let Some(topo) = self.topology.as_ref() else {
-                    self.status =
-                        Some("clusters not loaded - press L to log in, or r to retry".to_owned());
-                    return Outcome::Continue;
-                };
-                // Index 0 = "All clusters"; real clusters are offset by 1.
-                let sel = if self.agg.enabled {
-                    0
-                } else {
-                    topo.all()
-                        .iter()
-                        .position(|c| c == topo.selected())
-                        .unwrap_or(0)
-                        + 1
-                };
-                self.mode = Mode::Picker;
-                self.picker.select(Some(sel));
-            }
+            KeyCode::Char('/') => self.enter_input_mode(Mode::Search),
+            KeyCode::Char('c') => self.open_cluster_picker(),
             KeyCode::Enter => return self.activate(),
             _ => {}
         }
         Outcome::Continue
+    }
+
+    /// The tab a navigation key switches to: Tab/BackTab cycle the visible tabs;
+    /// number keys jump to a tab only when it's visible (capability + rights),
+    /// so an unsupported/hidden tab key is a no-op.
+    fn tab_for_key(&self, code: KeyCode) -> Option<Tab> {
+        const DIGITS: [(char, Tab); 10] = [
+            ('1', Tab::Ssh),
+            ('2', Tab::Kube),
+            ('3', Tab::Db),
+            ('4', Tab::Apps),
+            ('5', Tab::Users),
+            ('6', Tab::Roles),
+            ('7', Tab::Requests),
+            ('8', Tab::Tokens),
+            ('9', Tab::Bots),
+            ('0', Tab::Inventory),
+        ];
+        match code {
+            KeyCode::Tab => Some(self.next_visible_tab(true)),
+            KeyCode::BackTab => Some(self.next_visible_tab(false)),
+            KeyCode::Char(c) => DIGITS
+                .iter()
+                .find(|(digit, _)| *digit == c)
+                .map(|&(_, tab)| tab)
+                // SSH is always reachable; the others follow visibility.
+                .filter(|&tab| tab == Tab::Ssh || self.tab_visible(tab)),
+            _ => None,
+        }
+    }
+
+    /// Keys that act on the active tab's selection or open its forms. `None`
+    /// when the key means nothing on this tab (the global keys then apply).
+    fn on_key_tab_action(&mut self, code: KeyCode) -> Option<Outcome> {
+        let KeyCode::Char(c) = code else {
+            return None;
+        };
+        match (self.tab, c) {
+            // Token generation lives only on the Tokens tab.
+            (Tab::Tokens, 'g') => self.enter_input_mode(Mode::CreateToken),
+            // Tokens tab: remove the selected token (`tctl tokens rm <name>`).
+            (Tab::Tokens, 'd') if self.selected_index().is_some() => {
+                self.mode = Mode::ConfirmTokenRm;
+            }
+            // Users tab: create a user (form) or reset the selected user.
+            (Tab::Users, 'n') => {
+                self.add_user_form = AddUserForm::default();
+                self.mode = Mode::AddUser;
+            }
+            (Tab::Users, 'R') => {
+                if let Some(name) = self.selected_user_name() {
+                    self.mode = Mode::ConfirmUserReset(name);
+                }
+            }
+            (Tab::Requests, 'a') => return Some(self.review_selected(true)),
+            (Tab::Requests, 'd') => return Some(self.review_selected(false)),
+            (Tab::Requests, 'D') => return Some(self.drop_selected()),
+            (Tab::Requests, 'n') => self.enter_input_mode(Mode::CreateRequest),
+            // SCP file transfer for the selected SSH node (needs `tsh scp`).
+            (Tab::Ssh, 's') if self.caps.supports("scp") => self.open_scp_form(),
+            // SSH options (forward / tunnel / one-off command) for the selected node.
+            (Tab::Ssh, 'o') => self.open_ssh_options_form(),
+            // Background `tsh proxy db` tunnel for a GUI client (Db tab).
+            (Tab::Db, 'P') => return Some(self.db_proxy_selected()),
+            // Certificate lifecycle (`l` login / `u` logout) on Db and Apps.
+            (Tab::Db, 'l') => return Some(self.db_login_selected()),
+            (Tab::Db, 'u') => return Some(self.db_logout_selected()),
+            (Tab::Apps, 'l') => return Some(self.app_login_selected()),
+            (Tab::Apps, 'u') => return Some(self.app_logout_selected()),
+            // `tsh kube exec` a command in a pod (Kube tab).
+            (Tab::Kube, 'e') => self.open_kube_exec_form(),
+            _ => return None,
+        }
+        Some(Outcome::Continue)
+    }
+
+    /// Switch to a single-line text prompt, starting from an empty buffer.
+    fn enter_input_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+        self.input.clear();
+    }
+
+    /// `c`: open the cluster picker on the current selection.
+    fn open_cluster_picker(&mut self) {
+        // The picker lists the topology; without it (clusters not loaded
+        // yet, or `tsh clusters` failed - e.g. an expired session) there's
+        // nothing to show, so give feedback instead of entering an empty,
+        // invisible Picker mode.
+        let Some(topo) = self.topology.as_ref() else {
+            self.status = Some("clusters not loaded - press L to log in, or r to retry".to_owned());
+            return;
+        };
+        // Index 0 = "All clusters"; real clusters are offset by 1.
+        let sel = if self.agg.enabled {
+            0
+        } else {
+            topo.all()
+                .iter()
+                .position(|c| c == topo.selected())
+                .unwrap_or(0)
+                + 1
+        };
+        self.mode = Mode::Picker;
+        self.picker.select(Some(sel));
     }
 
     fn on_key_search(&mut self, key: KeyEvent) -> Outcome {
