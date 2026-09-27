@@ -117,3 +117,97 @@ impl ClusterTopology {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cluster(name: &str, kind: ClusterKind) -> ClusterContext {
+        ClusterContext {
+            name: ClusterName::try_from(name).unwrap(),
+            kind,
+            status: ClusterStatus::Online,
+        }
+    }
+
+    fn name(s: &str) -> ClusterName {
+        ClusterName::try_from(s).unwrap()
+    }
+
+    /// Root deliberately not first, so `root()` can't pass by accident.
+    fn topology(selected: Option<&str>) -> ClusterTopology {
+        let clusters = vec![
+            cluster("leaf-a", ClusterKind::Leaf),
+            cluster("root", ClusterKind::Root),
+            cluster("leaf-b", ClusterKind::Leaf),
+        ];
+        ClusterTopology::new(clusters, selected.map(name).as_ref()).unwrap()
+    }
+
+    fn backend_code(err: DomainError) -> &'static str {
+        match err {
+            DomainError::Backend { code, .. } => code,
+            other => panic!("expected a backend error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_an_empty_list() {
+        let err = ClusterTopology::new(Vec::new(), None).unwrap_err();
+        assert_eq!(backend_code(err), "NO_CLUSTERS");
+    }
+
+    #[test]
+    fn rejects_a_list_without_a_root() {
+        let leaves = vec![cluster("leaf", ClusterKind::Leaf)];
+        let err = ClusterTopology::new(leaves, None).unwrap_err();
+        assert_eq!(backend_code(err), "NO_ROOT_CLUSTER");
+    }
+
+    #[test]
+    fn selection_defaults_to_the_root() {
+        assert_eq!(topology(None).selected().name.as_str(), "root");
+        // A current cluster the CLI reported but that isn't listed: root too.
+        assert_eq!(topology(Some("gone")).selected().name.as_str(), "root");
+    }
+
+    #[test]
+    fn selection_honours_the_reported_current_cluster() {
+        assert_eq!(topology(Some("leaf-b")).selected().name.as_str(), "leaf-b");
+    }
+
+    #[test]
+    fn root_and_leaves_are_found_wherever_they_are_listed() {
+        let topo = topology(Some("leaf-a"));
+        assert_eq!(topo.root().name.as_str(), "root");
+        let leaves: Vec<_> = topo.leaves().map(|c| c.name.as_str()).collect();
+        assert_eq!(leaves, ["leaf-a", "leaf-b"]);
+        assert_eq!(topo.all().len(), 3);
+    }
+
+    #[test]
+    fn select_switches_only_to_a_known_cluster() {
+        let mut topo = topology(None);
+        topo.select(&name("leaf-a")).unwrap();
+        assert_eq!(topo.selected().name.as_str(), "leaf-a");
+
+        let err = topo.select(&name("evil.example.com")).unwrap_err();
+        assert!(matches!(
+            err,
+            DomainError::InvalidValue {
+                field: "cluster_name"
+            }
+        ));
+        // A rejected selection leaves the previous one (and the list) intact.
+        assert_eq!(topo.selected().name.as_str(), "leaf-a");
+        assert_eq!(topo.all().len(), 3);
+    }
+
+    #[test]
+    fn online_reflects_the_status() {
+        let mut c = cluster("root", ClusterKind::Root);
+        assert!(c.is_online());
+        c.status = ClusterStatus::Offline;
+        assert!(!c.is_online());
+    }
+}
