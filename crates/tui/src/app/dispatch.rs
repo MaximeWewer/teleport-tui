@@ -203,7 +203,7 @@ fn restore_root(repos: &Repositories, root: &str) -> Option<JobResult> {
 /// which is why the fan-out runs serially on one thread, not the concurrent
 /// per-cluster jobs used for cluster-scoped tabs (a parallel profile switch would
 /// race). A cluster without a live session yields a single `login_required`
-/// placeholder instead of erroring.
+/// placeholder; any other switch failure yields an error row.
 fn admin_cluster_rows(repos: &Repositories, tab: Tab, ctx: &ClusterContext) -> Vec<AggRow> {
     let cluster = ctx.name.to_string();
     // Recordings carries a per-row sid (for `tsh play`); the admin tabs don't.
@@ -221,7 +221,7 @@ fn admin_cluster_rows(repos: &Repositories, tab: Tab, ctx: &ClusterContext) -> V
                     .collect(),
                 Err(e) => vec![err_row(cluster, &e)],
             },
-            Err(_) => vec![login_required_row(cluster)],
+            Err(e) => vec![select_failed_row(cluster, e)],
         };
     }
     match repos.admin.select_cluster(&cluster) {
@@ -237,7 +237,7 @@ fn admin_cluster_rows(repos: &Repositories, tab: Tab, ctx: &ClusterContext) -> V
                 .collect(),
             Err(e) => vec![err_row(cluster, &e)],
         },
-        Err(_) => vec![login_required_row(cluster)],
+        Err(e) => vec![select_failed_row(cluster, e)],
     }
 }
 
@@ -260,6 +260,16 @@ fn err_row(cluster: String, e: &AppError) -> AggRow {
         cells: vec![format!("⚠ {}", e.message())],
         login_required: false,
         sid: None,
+    }
+}
+
+/// The placeholder for a cluster whose profile could not be selected: a
+/// login-required row (actionable with `L`) when only a fresh login can fix it,
+/// otherwise the real error (network, backend, …).
+fn select_failed_row(cluster: String, e: DomainError) -> AggRow {
+    match e {
+        DomainError::NotAuthenticated | DomainError::CertExpired => login_required_row(cluster),
+        e => err_row(cluster, &e.into()),
     }
 }
 

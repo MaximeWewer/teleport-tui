@@ -1,7 +1,7 @@
 //! `tctl` adapter: read-only admin listings (`tctl get users|roles`). `tctl`
 //! always targets the *currently logged-in* proxy (it has no cluster flag), so
 //! the all-clusters admin view re-selects each cluster via [`select_cluster`]
-//! (`tsh login --proxy`) before listing. Editing is out of scope; token
+//! (`tsh login <cluster>`) before listing. Editing is out of scope; token
 //! *generation* is handled interactively by the UI (terminal handed to `tctl`,
 //! never captured).
 //!
@@ -18,7 +18,7 @@ use domain::admin::{
 };
 use domain::error::DomainError;
 use domain::port::AdminRepository;
-use domain::value::ResourceName;
+use domain::value::{ClusterName, ResourceName};
 use nanoserde::DeJson;
 use zeroize::Zeroizing;
 
@@ -180,35 +180,28 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
     }
 
     fn select_cluster(&self, cluster: &str) -> Result<(), DomainError> {
-        // `cluster` is a validated topology name. It becomes a *positional* argv
-        // element, so also reject empty / leading-`-` (flag injection) / whitespace
-        // / control chars, defence-in-depth against a malformed value reshaping argv.
-        if cluster.is_empty()
-            || cluster.starts_with('-')
-            || cluster.chars().any(|c| c.is_whitespace() || c.is_control())
-        {
-            return Err(DomainError::InvalidValue { field: "cluster" });
-        }
+        // `cluster` becomes a *positional* argv element: validate it as a
+        // `ClusterName` (no empty / leading-`-` flag injection / whitespace /
+        // control chars), defence-in-depth against a value reshaping argv.
+        let cluster = ClusterName::try_from(cluster)?;
         // `tsh login <cluster>` (POSITIONAL) selects a cluster under the current
         // proxy - the root or a trusted leaf - so the following `tctl` call, which
         // targets whatever cluster the profile has selected, hits the right one.
         // NOT `tsh login --proxy=<cluster>`: `--proxy` is a proxy *address*, not a
         // cluster, so passing a cluster name there left the selected cluster (and
         // thus `tctl`) pointed at the previous one. With a valid cached cert this
-        // is instant and silent; without one tsh would need a password - impossible
-        // here (no tty) - so a non-zero exit means "login required".
-        let req = CommandRequest::new(
-            self.tsh.clone(),
-            vec!["login".to_owned(), cluster.to_owned()],
-        );
-        let outcome = self.runner.run(&req).map_err(|e| DomainError::Backend {
-            code: "TSH_SPAWN_FAILED",
-            detail: e.to_string(),
-        })?;
-        if outcome.succeeded() {
-            Ok(())
-        } else {
-            Err(DomainError::NotAuthenticated)
+        // is instant and silent. Failures go through the shared classifier, so a
+        // network error or an expired cert stays distinguishable (with its
+        // redacted stderr) from a plain "login required".
+        let args = vec!["login".to_owned(), cluster.to_string()];
+        match run_cli(&self.runner, &self.tsh, args, "TSH_SPAWN_FAILED") {
+            Ok(_) => Ok(()),
+            // Without a cached session tsh tries to prompt for credentials, which
+            // fails here (stdin is not a tty): that is "login required" too.
+            Err(DomainError::Backend { detail, .. }) if needs_interactive_login(&detail) => {
+                Err(DomainError::NotAuthenticated)
+            }
+            Err(e) => Err(e),
         }
     }
 
@@ -238,6 +231,13 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
         let stdout = Zeroizing::new(outcome.stdout);
         parse_token(&stdout)
     }
+}
+
+/// Whether a failed `tsh login` stderr shows it wanted to prompt the user
+/// (password / MFA / SSO), i.e. only an interactive login can fix it.
+fn needs_interactive_login(stderr: &str) -> bool {
+    let s = stderr.to_lowercase();
+    s.contains("not a terminal") || s.contains("inappropriate ioctl") || s.contains("password")
 }
 
 #[derive(Debug, DeJson)]
@@ -461,6 +461,58 @@ impl AdminRepository for UnavailableAdmin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::process::CommandOutcome;
+
+    /// Runner that fails every command with `stderr`.
+    #[derive(Debug)]
+    struct FailingRunner {
+        stderr: &'static str,
+    }
+    impl CommandRunner for FailingRunner {
+        fn run(&self, _req: &CommandRequest) -> std::io::Result<CommandOutcome> {
+            Ok(CommandOutcome {
+                status: Some(1),
+                stdout: String::new(),
+                stderr: self.stderr.to_owned(),
+            })
+        }
+    }
+
+    fn select_with(stderr: &'static str) -> DomainError {
+        TctlAdminRepository::new(FailingRunner { stderr }, "tctl".into(), "tsh".into())
+            .select_cluster("leaf.example")
+            .unwrap_err()
+    }
+
+    #[test]
+    fn select_cluster_distinguishes_failures() {
+        assert!(matches!(
+            select_with("ERROR: not logged in"),
+            DomainError::NotAuthenticated
+        ));
+        assert!(matches!(
+            select_with("ERROR: underlying reader is not a terminal"),
+            DomainError::NotAuthenticated
+        ));
+        assert!(matches!(
+            select_with("ERROR: your certificate has expired"),
+            DomainError::CertExpired
+        ));
+        match select_with("ERROR: dial tcp 10.0.0.1:443: connection refused") {
+            DomainError::Backend { detail, .. } => assert!(detail.contains("connection refused")),
+            other => panic!("expected Backend, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_cluster_rejects_flag_like_names() {
+        let repo =
+            TctlAdminRepository::new(FailingRunner { stderr: "" }, "tctl".into(), "tsh".into());
+        assert!(matches!(
+            repo.select_cluster("--proxy=evil"),
+            Err(DomainError::InvalidValue { .. })
+        ));
+    }
 
     #[test]
     fn parses_users_fixture() {
