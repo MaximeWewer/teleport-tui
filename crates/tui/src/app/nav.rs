@@ -1,10 +1,12 @@
 //! Navigation & view-state: tab switching/visibility, selection & scrolling,
 //! picker movement, and clearing per-tab/session state. A child `impl super::App`.
 //!
-//! Split out of `app`; model types and imports arrive via `super::*`.
+//! Split out of `app`; the model types are imported from `super`.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use domain::node::SshNode;
+
+use super::listings::Listings;
+use super::{App, Mode, Tab, clamp_step};
 
 impl App {
     pub(super) fn clear_active(&mut self) {

@@ -4,11 +4,23 @@
 //! Pure type definitions - the update/dispatch logic lives in [`super`].
 //!
 //! A child module of `app`: model types are re-exported from `super` so the rest
-//! of the crate keeps referring to them as `crate::app::Tab` etc. Imports and the
-//! sibling child modules' types come in via `super::*`.
+//! of the crate keeps referring to them as `crate::app::Tab` etc.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use domain::admin::{
+    AdminRole, AdminUser, Bot, GeneratedToken, Instance, InviteLink, ProvisionToken,
+};
+use domain::capability::Capabilities;
+use domain::node::SshNode;
+use domain::port::{
+    AdminRepository, AppRepository, AuthGateway, ClusterRepository, DatabaseRepository,
+    KubeRepository, NodeRepository, RecordingRepository, RequestRepository, SessionRepository,
+};
+use domain::preferences::Preferences;
+use domain::recording::SessionRecording;
+use domain::request::AccessRequest;
+use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
+use domain::value::{ClusterName, DeviceName, Hostname, Identifier, Login, ResourceName};
+use zeroize::Zeroizing;
 
 /// Resource tab. Each maps to a `tsh <verb> ls` listing and an Enter action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

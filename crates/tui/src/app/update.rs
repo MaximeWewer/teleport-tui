@@ -1,10 +1,19 @@
 //! The update loop: dispatching background `Job`s and applying their
 //! `JobResult`s, plus the aggregate/refresh bookkeeping. A child `impl super::App`.
 //!
-//! Split out of `app`; model types and imports arrive via `super::*`.
+//! Split out of `app`; the model types are imported from `super`.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use domain::admin::{GeneratedToken, InviteLink};
+use domain::cluster::{ClusterContext, ClusterTopology};
+use domain::error::{DomainError, ReportableError};
+use domain::mfa::MfaDevice;
+use domain::profile::Profile;
+use domain::resource::Resource;
+use domain::session::ActiveSession;
+use domain::value::ClusterName;
+
+use super::dispatch::{Job, JobResult, Lane, Listing, agg_rows_of, err_row};
+use super::{AggRow, App, Mode, PREFETCH_BASE, Tab};
 
 impl App {
     /// Dispatch an auxiliary (ungated) job: status / clusters.

@@ -3,48 +3,22 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::Sender;
 
-use application::command as cmd;
-use application::use_case::{
-    AddUser, GenerateToken, GetStatus, ListApps, ListBots, ListClusters, ListDatabases,
-    ListInstances, ListKube, ListMfaDevices, ListNodes, ListRecordings, ListRequests, ListRoles,
-    ListSessions, ListTokens, ListUsers, ProbeAdminRights, RemoveToken, ResetUser, SelectCluster,
-};
-use domain::admin::{
-    AdminRole, AdminUser, Bot, GeneratedToken, Instance, InviteLink, ProvisionToken,
-};
-use domain::auth::AuthMethod;
 use domain::capability::Capabilities;
-use domain::cluster::{ClusterContext, ClusterTopology};
-use domain::error::{DomainError, ReportableError};
+use domain::cluster::ClusterTopology;
+use domain::error::ReportableError;
 use domain::mfa::MfaDevice;
-use domain::node::SshNode;
-use domain::port::{
-    AdminRepository, AppRepository, AuthGateway, ClusterRepository, DatabaseRepository, ErrorLog,
-    KubeRepository, LogLevel, NodeRepository, PreferencesStore, RecordingRepository,
-    RequestRepository, SessionRepository,
-};
+use domain::port::{ErrorLog, LogLevel, PreferencesStore};
 use domain::preferences::Preferences;
 use domain::profile::Profile;
-use domain::recording::SessionRecording;
-use domain::request::{AccessRequest, RequestState};
-use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
-use domain::secret::SecretString;
 use domain::session::ActiveSession;
-use domain::value::{
-    ClusterName, DeviceName, Hostname, Identifier, Login, RequestId, ResourceName, RoleList,
-    SessionId, TokenTypes,
-};
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use domain::value::ClusterName;
 use ratatui::widgets::{ListState, TableState};
-use zeroize::Zeroizing;
 
 use crate::forms::{
-    AddUserForm, KubeExecForm, LoginForm, NodeTarget, ScpForm, SettingsForm, SshOptionsForm,
-    forward_binds_all_interfaces, parse_field, parse_opt_field, valid_command, valid_forward,
-    valid_path,
+    AddUserForm, KubeExecForm, LoginForm, ScpForm, SettingsForm, SshOptionsForm,
+    forward_binds_all_interfaces,
 };
 
 mod actions;
@@ -54,10 +28,10 @@ mod listings;
 mod model;
 mod nav;
 mod update;
-use dispatch::{Dispatcher, Job, JobResult, Lane, Listing, agg_rows_of, err_row};
+use dispatch::{Dispatcher, Job};
 use listings::{AggView, Listings, PickList};
 // Re-exported so the rest of the crate keeps using `crate::app::Tab` etc., and so
-// the sibling child modules' `use super::*` still resolves the model types.
+// the sibling child modules import the model types from `super`.
 pub(crate) use model::*;
 
 #[derive(Debug)]

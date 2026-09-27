@@ -5,10 +5,16 @@
 //!
 //! A child module of `app`: this is a second `impl super::App` block, so its
 //! methods share `App`'s private fields and can call the update/dispatch methods
-//! that stay in [`super`]. Model types and imports come in via `super::*`.
+//! that stay in [`super`]. Model types are imported from `super`.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use application::command as cmd;
+use domain::error::DomainError;
+use domain::value::{DeviceName, ResourceName, RoleList, SessionId};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use super::dispatch::Job;
+use super::{App, Mode, Outcome, Tab, TextEvent};
+use crate::forms::AddUserForm;
 
 impl App {
     /// Mouse-wheel scroll: reuse the active mode's ↑/↓ handling so the wheel moves

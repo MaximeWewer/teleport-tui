@@ -4,14 +4,36 @@
 //! of `app` so the threading / channel / `Send + Sync` plumbing lives apart from
 //! the view/update state in [`super::App`].
 //!
-//! A child module of `app`: it shares the parent's imports and model types
-//! (`Repositories`, `Tab`, `AggRow`, `ProxyEvent`, the use cases) via `super::*`.
+//! A child module of `app`: it uses the parent's model types (`Repositories`,
+//! `Tab`, `AggRow`, `ProxyEvent`) from `super`.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
 use std::collections::VecDeque;
 use std::sync::Condvar;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
+
+use application::use_case::{
+    AddUser, GenerateToken, GetStatus, ListApps, ListBots, ListClusters, ListDatabases,
+    ListInstances, ListKube, ListMfaDevices, ListNodes, ListRecordings, ListRequests, ListRoles,
+    ListSessions, ListTokens, ListUsers, ProbeAdminRights, RemoveToken, ResetUser, SelectCluster,
+};
+use domain::admin::{
+    AdminRole, AdminUser, Bot, GeneratedToken, Instance, InviteLink, ProvisionToken,
+};
+use domain::cluster::{ClusterContext, ClusterTopology};
+use domain::error::{DomainError, ReportableError};
+use domain::mfa::MfaDevice;
+use domain::node::SshNode;
+use domain::profile::Profile;
+use domain::recording::SessionRecording;
+use domain::request::AccessRequest;
+use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
+use domain::secret::SecretString;
+use domain::session::ActiveSession;
+use domain::value::{ClusterName, ResourceName, RoleList, TokenTypes};
+
+use super::{AggRow, ProxyEvent, Repositories, Tab};
 
 /// A unit of CLI work to run off the UI thread.
 #[derive(Debug)]

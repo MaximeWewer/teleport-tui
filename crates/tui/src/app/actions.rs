@@ -2,10 +2,24 @@
 //! into an interactive `tsh` command or a background proxy (`Outcome`). A child
 //! `impl super::App`.
 //!
-//! Split out of `app`; model types and imports arrive via `super::*`.
+//! Split out of `app`; the model types are imported from `super`.
 
-#[allow(clippy::wildcard_imports)]
-use super::*;
+use application::command as cmd;
+use domain::auth::AuthMethod;
+use domain::error::DomainError;
+use domain::request::{AccessRequest, RequestState};
+use domain::resource::Resource;
+use domain::value::{
+    ClusterName, Hostname, Identifier, Login, RequestId, ResourceName, RoleList, SessionId,
+    TokenTypes,
+};
+
+use super::dispatch::Job;
+use super::{App, Mode, Outcome, PendingConnect, Tab, tab_columns};
+use crate::forms::{
+    KubeExecForm, LoginForm, NodeTarget, ScpForm, SettingsForm, SshOptionsForm, parse_field,
+    parse_opt_field, valid_command, valid_forward, valid_path,
+};
 
 impl App {
     /// Open the login form, pre-filling proxy/user from the current profile (if
