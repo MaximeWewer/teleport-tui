@@ -2011,3 +2011,43 @@ fn failed_admin_probe_is_reported_not_mistaken_for_no_rights() {
     let status = app.status.as_deref().unwrap_or("");
     assert!(status.contains("TCTL_SPAWN_FAILED"), "{status}");
 }
+
+#[test]
+fn forward_bound_on_all_interfaces_warns_in_status() {
+    use crate::forms::forward_binds_all_interfaces;
+    use std::process::Command;
+    assert!(forward_binds_all_interfaces("0.0.0.0:8080:db:5432"));
+    assert!(forward_binds_all_interfaces("*:8080:db:5432"));
+    assert!(forward_binds_all_interfaces(":8080:db:5432"));
+    assert!(forward_binds_all_interfaces("[::]:8080:db:5432"));
+    assert!(!forward_binds_all_interfaces("8080:db:5432"));
+    assert!(!forward_binds_all_interfaces("127.0.0.1:8080:db:5432"));
+    assert!(!forward_binds_all_interfaces("[::1]:8080:db:5432"));
+
+    let mut app = test_app();
+    let spawn = || Command::new("sleep").arg("30").spawn().unwrap();
+    app.attach_forward(Forward::new(
+        spawn(),
+        "8080:localhost:80".to_owned(),
+        "root@web-01".to_owned(),
+        "root.example".to_owned(),
+    ));
+    assert!(
+        !app.status
+            .as_deref()
+            .unwrap_or_default()
+            .contains("WARNING")
+    );
+    app.attach_forward(Forward::new(
+        spawn(),
+        "0.0.0.0:9090:localhost:90".to_owned(),
+        "root@web-01".to_owned(),
+        "root.example".to_owned(),
+    ));
+    assert!(
+        app.status
+            .as_deref()
+            .unwrap_or_default()
+            .contains("WARNING")
+    );
+}

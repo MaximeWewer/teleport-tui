@@ -41,8 +41,8 @@ use zeroize::Zeroizing;
 
 use crate::forms::{
     AUTH_OPTIONS, AddUserForm, KubeExecForm, LoginForm, MFA_OPTIONS, ScpForm, SettingsForm,
-    SshOptionsForm, opt_index, valid_command, valid_forward, valid_path, valid_roles,
-    valid_token_type, valid_user,
+    SshOptionsForm, forward_binds_all_interfaces, opt_index, valid_command, valid_forward,
+    valid_path, valid_roles, valid_token_type, valid_user,
 };
 
 mod actions;
@@ -369,9 +369,16 @@ impl App {
 
     /// Register a started background SSH forward. Called by the event loop once the
     /// tunnel is confirmed up.
+    /// A forward bound on every interface gets a warning: anyone on the network
+    /// can reach the tunnel.
     pub(crate) fn attach_forward(&mut self, forward: Forward) {
+        let exposed = if forward_binds_all_interfaces(&forward.spec) {
+            " - WARNING: bound on all interfaces, reachable from the network"
+        } else {
+            ""
+        };
         self.status = Some(format!(
-            "forward up: {} · {} ({})",
+            "forward up: {} · {} ({}){exposed}",
             forward.spec, forward.target, forward.cluster
         ));
         self.forwards.push(forward);

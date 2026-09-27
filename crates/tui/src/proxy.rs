@@ -298,10 +298,7 @@ fn kube_proxy_attempt(
 /// up. `spec` is a validated `[bind:]port:host:hostport` forward; a blank `user`
 /// lets tsh pick the default login.
 ///
-/// Readiness: when the local bind is on localhost we poll its port until it
-/// accepts a connection; otherwise we wait a short grace period. If the child
-/// exits early (e.g. it needed an interactive MFA prompt it can't get with a
-/// detached stdin, or the port is taken) that surfaces as an error.
+/// Readiness: see [`start_forward`].
 ///
 /// SECURITY: argv only, no shell; `cluster`/`user`/`host`/`spec` are validated
 /// upstream.
@@ -320,39 +317,68 @@ pub(crate) fn start_ssh_forward(
     } else {
         format!("{user}@{host}")
     };
-    let mut child = spawn_tracked(
-        Command::new(tsh)
-            .args(["ssh", "-c", cluster, "-L", spec, "-N", &target])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null()),
-    )?;
+    start_forward(local_forward_port(spec), || {
+        spawn_tracked(
+            Command::new(tsh)
+                .args(["ssh", "-c", cluster, "-L", spec, "-N", &target])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null()),
+        )
+    })
+}
 
-    let local = local_forward_port(spec);
-    // ~4s: bail out the moment the child dies; otherwise confirm the local port
-    // (when known) or fall through to "assumed up" after the grace period.
-    for _ in 0..40 {
-        let exited = match child.try_wait() {
-            Ok(st) => st.is_some(),
+/// Spawn a forward and wait until it is up. With a localhost bind (`local`), the
+/// port must be free beforehand (else a squatter would answer the probe) and the
+/// forward is ready only once the port answers *while the child is alive*; a
+/// child still alive but never listening (stuck on a login/MFA prompt it can't
+/// get with a detached stdin) is an error, not a silent "forward up". A
+/// non-local bind can't be probed by connecting, so a child that survives a
+/// short grace period counts as up. A child that exits early is always an error.
+fn start_forward(
+    local: Option<u16>,
+    spawn: impl FnOnce() -> io::Result<Child>,
+) -> io::Result<Child> {
+    let exited = || {
+        io::Error::other(
+            "forward exited immediately (not logged in / MFA required, or port in use)",
+        )
+    };
+    if let Some(port) = local {
+        if !port_is_free(port) {
+            return Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                "the forward's local port is already in use",
+            ));
+        }
+        let mut child = spawn()?;
+        return match await_listen(&mut child, port) {
+            Attempt::Ready(()) => Ok(child),
+            Attempt::PortLost => {
+                stop_child(&mut child);
+                Err(exited())
+            }
+            Attempt::Failed(_) => {
+                stop_child(&mut child);
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "forward did not start listening in time (log in first, or MFA may be required)",
+                ))
+            }
+        };
+    }
+    let mut child = spawn()?;
+    for _ in 0..20 {
+        match child.try_wait() {
+            Ok(None) => {}
+            Ok(Some(_)) => {
+                stop_child(&mut child);
+                return Err(exited());
+            }
             Err(e) => {
                 stop_child(&mut child);
                 return Err(e);
             }
-        };
-        if exited {
-            stop_child(&mut child);
-            return Err(io::Error::other(
-                "forward exited immediately (not logged in / MFA required, or port in use)",
-            ));
-        }
-        if let Some(port) = local
-            && TcpStream::connect_timeout(
-                &SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
-                Duration::from_millis(80),
-            )
-            .is_ok()
-        {
-            return Ok(child);
         }
         sleep(Duration::from_millis(100));
     }
@@ -576,6 +602,16 @@ fn browser_command(url: &str) -> Command {
 #[cfg(test)]
 mod tests {
     use super::local_forward_port;
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
+    /// Serialises the tests that pick and probe localhost ports: a port one test
+    /// releases (`free_port`) could otherwise be handed to another test's `:0`
+    /// bind, which would answer the first test's readiness probe.
+    static PORTS: Mutex<()> = Mutex::new(());
+
+    fn ports() -> MutexGuard<'static, ()> {
+        PORTS.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 
     // A child that exits at once never listens, so every auto-port attempt reads
     // as a lost port (`PortLost`); the loop should exhaust `PORT_RETRIES` and then
@@ -588,6 +624,7 @@ mod tests {
         use std::process::{Command, Stdio};
         use std::sync::atomic::{AtomicUsize, Ordering};
 
+        let _ports = ports();
         let attempts = AtomicUsize::new(0);
         let result = start_listening_proxy(None, |_port| {
             attempts.fetch_add(1, Ordering::Relaxed);
@@ -610,6 +647,7 @@ mod tests {
         use std::net::{Ipv4Addr, TcpListener};
         use std::sync::atomic::{AtomicUsize, Ordering};
 
+        let _ports = ports();
         let squatter = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
         let port = squatter.local_addr().expect("addr").port();
         let spawns = AtomicUsize::new(0);
@@ -631,6 +669,7 @@ mod tests {
         use std::net::{Ipv4Addr, TcpListener};
         use std::process::{Command, Stdio};
 
+        let _ports = ports();
         let squatter = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
         let port = squatter.local_addr().expect("addr").port();
         let mut child = Command::new("true")
@@ -648,6 +687,75 @@ mod tests {
     // `sleep` (a grandchild) and prints its pid. Killing only the direct child
     // would orphan it; a process-group kill takes it down too. Linux-only (uses
     // /proc for a liveness probe on a process that isn't ours to waitpid).
+    // A localhost forward whose child stays alive but never listens (stuck on an
+    // MFA prompt, say) must fail rather than report "forward up".
+    #[cfg(unix)]
+    #[test]
+    fn forward_that_never_listens_is_an_error() {
+        use super::{free_port, start_forward};
+        use std::process::{Command, Stdio};
+
+        let _ports = ports();
+        let port = free_port().expect("port");
+        let result = start_forward(Some(port), || {
+            Command::new("sleep")
+                .arg("30")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+        });
+        let err = result.expect_err("never listening must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    // A forward whose local port is already taken is refused before spawning.
+    #[cfg(unix)]
+    #[test]
+    fn forward_on_a_taken_port_is_refused_without_spawning() {
+        use super::start_forward;
+        use std::net::{Ipv4Addr, TcpListener};
+
+        let _ports = ports();
+        let squatter = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind");
+        let port = squatter.local_addr().expect("addr").port();
+        let mut spawned = false;
+        let result = start_forward(Some(port), || {
+            spawned = true;
+            std::process::Command::new("true").spawn()
+        });
+        let err = result.expect_err("port in use must fail");
+        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+        assert!(!spawned);
+    }
+
+    // A forward that answers on its port while alive is ready.
+    #[cfg(unix)]
+    #[test]
+    fn forward_listening_while_alive_is_ready() {
+        use super::{free_port, start_forward, stop_child};
+        use std::net::{Ipv4Addr, TcpListener};
+        use std::process::{Command, Stdio};
+
+        let _ports = ports();
+        let port = free_port().expect("port");
+        let mut listener = None;
+        let mut child = start_forward(Some(port), || {
+            let child = Command::new("sleep")
+                .arg("30")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+            // Stand in for the tunnel's listener once the port was checked free.
+            listener = Some(TcpListener::bind((Ipv4Addr::LOCALHOST, port)).expect("bind"));
+            child
+        })
+        .expect("ready");
+        assert!(listener.is_some());
+        stop_child(&mut child);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn stop_child_kills_the_whole_process_group() {

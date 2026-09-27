@@ -348,6 +348,17 @@ pub(crate) fn valid_forward(spec: &str) -> bool {
         })
 }
 
+/// Whether a `-L` spec binds every interface (`0.0.0.0`, `*`, `[::]` or an
+/// empty bind address), which exposes the tunnel to the network rather than
+/// just this machine.
+pub(crate) fn forward_binds_all_interfaces(spec: &str) -> bool {
+    if let Some(rest) = spec.strip_prefix('[') {
+        return rest.split(']').next().is_some_and(|a| a == "::");
+    }
+    let parts: Vec<&str> = spec.split(':').collect();
+    matches!(parts.as_slice(), [bind, _, _, _] if matches!(*bind, "0.0.0.0" | "*" | ""))
+}
+
 /// Validate a one-off remote command before it becomes a CLI argument: no
 /// control chars (terminal/log safety) and no leading `-` (so `tsh` can't reparse
 /// it as a flag). Spaces are allowed - as with plain `ssh host cmd`, the command
