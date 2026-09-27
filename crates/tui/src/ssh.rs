@@ -13,7 +13,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::cursor::{MoveTo, Show};
 use ratatui::crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, KeyCode, KeyEventKind, KeyModifiers,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
 use ratatui::crossterm::execute;
 use ratatui::crossterm::style::{
@@ -108,11 +108,7 @@ pub(crate) fn run_interactive(
     // Skipped when shutting down on SIGHUP/SIGTERM.
     if pause_on_exit && !crate::signals::terminate_requested() {
         enable_raw_mode()?;
-        let note = match spawn.as_ref().ok().and_then(ExitStatus::code) {
-            Some(0) => "ok".to_owned(),
-            Some(c) => format!("exit {c}"),
-            None => "terminated".to_owned(),
-        };
+        let note = exit_note(spawn.as_ref().ok().and_then(ExitStatus::code));
         execute!(
             out,
             SetForegroundColor(Color::DarkGrey),
@@ -139,6 +135,23 @@ pub(crate) fn run_interactive(
     terminal.clear()?;
 
     spawn
+}
+
+/// The finished-command banner's status note: `ok`, `exit <code>`, or
+/// `terminated` (killed by a signal, or the spawn itself failed).
+fn exit_note(code: Option<i32>) -> String {
+    match code {
+        Some(0) => "ok".to_owned(),
+        Some(c) => format!("exit {c}"),
+        None => "terminated".to_owned(),
+    }
+}
+
+/// Whether a key press stops a replay: Esc, `q`, or Ctrl-C (a key, not a
+/// signal, since raw mode is on).
+fn is_stop_key(k: &KeyEvent) -> bool {
+    matches!(k.code, KeyCode::Esc | KeyCode::Char('q'))
+        || (k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL))
 }
 
 /// Wait for a handed-off child. Polls rather than blocking in `wait()` so that a
@@ -233,17 +246,49 @@ pub(crate) fn play_recording(
         if event::poll(Duration::from_millis(80))?
             && let Event::Key(k) = event::read()?
             && k.kind == KeyEventKind::Press
+            && is_stop_key(&k)
         {
-            let stop = matches!(k.code, KeyCode::Esc | KeyCode::Char('q'))
-                || (k.code == KeyCode::Char('c') && k.modifiers.contains(KeyModifiers::CONTROL));
-            if stop {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None; // user-stopped
-            }
+            let _ = child.kill();
+            let _ = child.wait();
+            break None; // user-stopped
         }
     };
 
     terminal.clear()?;
     Ok(status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exit_note_describes_the_status() {
+        assert_eq!(exit_note(Some(0)), "ok");
+        assert_eq!(exit_note(Some(130)), "exit 130");
+        assert_eq!(exit_note(None), "terminated");
+    }
+
+    #[test]
+    fn stop_keys_are_esc_q_and_ctrl_c() {
+        let key = |code, modifiers| KeyEvent::new(code, modifiers);
+        assert!(is_stop_key(&key(KeyCode::Esc, KeyModifiers::NONE)));
+        assert!(is_stop_key(&key(KeyCode::Char('q'), KeyModifiers::NONE)));
+        assert!(is_stop_key(&key(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        // A plain `c`, `Q` or Enter keeps the replay running.
+        assert!(!is_stop_key(&key(KeyCode::Char('c'), KeyModifiers::NONE)));
+        assert!(!is_stop_key(&key(KeyCode::Char('Q'), KeyModifiers::SHIFT)));
+        assert!(!is_stop_key(&key(KeyCode::Enter, KeyModifiers::NONE)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_child_returns_the_exit_status() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "exit 3"])
+            .stdin(Stdio::null())
+            .spawn()
+            .unwrap();
+        assert_eq!(wait_child(&mut child).unwrap().code(), Some(3));
+    }
 }
