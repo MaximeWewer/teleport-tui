@@ -42,6 +42,6 @@ impl Resource for SshNode {
         vec![self.hostname.to_string(), addr, labels]
     }
     fn matches(&self, needle: &str) -> bool {
-        SshNode::matches(self, needle)
+        Self::matches(self, needle)
     }
 }

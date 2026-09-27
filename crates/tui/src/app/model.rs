@@ -40,48 +40,48 @@ pub(crate) enum Tab {
 
 impl Tab {
     /// Tab order, grouped: Access (SSH/Kube/Db/Apps) then Admin, then audit.
-    pub(crate) const ALL: [Tab; 11] = [
-        Tab::Ssh,
-        Tab::Kube,
-        Tab::Db,
-        Tab::Apps,
-        Tab::Users,
-        Tab::Roles,
-        Tab::Requests,
-        Tab::Tokens,
-        Tab::Bots,
-        Tab::Inventory,
-        Tab::Recordings,
+    pub(crate) const ALL: [Self; 11] = [
+        Self::Ssh,
+        Self::Kube,
+        Self::Db,
+        Self::Apps,
+        Self::Users,
+        Self::Roles,
+        Self::Requests,
+        Self::Tokens,
+        Self::Bots,
+        Self::Inventory,
+        Self::Recordings,
     ];
 
     /// Resource-access tabs (cluster-scoped listings of infrastructure).
-    pub(crate) const ACCESS: [Tab; 4] = [Tab::Ssh, Tab::Kube, Tab::Db, Tab::Apps];
+    pub(crate) const ACCESS: [Self; 4] = [Self::Ssh, Self::Kube, Self::Db, Self::Apps];
     /// Administrative / security tabs.
-    pub(crate) const ADMIN: [Tab; 6] = [
-        Tab::Users,
-        Tab::Roles,
-        Tab::Requests,
-        Tab::Tokens,
-        Tab::Bots,
-        Tab::Inventory,
+    pub(crate) const ADMIN: [Self; 6] = [
+        Self::Users,
+        Self::Roles,
+        Self::Requests,
+        Self::Tokens,
+        Self::Bots,
+        Self::Inventory,
     ];
     /// Audit / session-history tabs (cluster-scoped, not admin).
-    pub(crate) const AUDIT: [Tab; 1] = [Tab::Recordings];
+    pub(crate) const AUDIT: [Self; 1] = [Self::Recordings];
 
     #[must_use]
     pub(crate) fn title(self) -> &'static str {
         match self {
-            Tab::Ssh => "SSH",
-            Tab::Kube => "Kubernetes",
-            Tab::Db => "Databases",
-            Tab::Apps => "Apps",
-            Tab::Requests => "Requests",
-            Tab::Users => "Users",
-            Tab::Roles => "Roles",
-            Tab::Tokens => "Tokens",
-            Tab::Bots => "Bots",
-            Tab::Inventory => "Inventory",
-            Tab::Recordings => "Recordings",
+            Self::Ssh => "SSH",
+            Self::Kube => "Kubernetes",
+            Self::Db => "Databases",
+            Self::Apps => "Apps",
+            Self::Requests => "Requests",
+            Self::Users => "Users",
+            Self::Roles => "Roles",
+            Self::Tokens => "Tokens",
+            Self::Bots => "Bots",
+            Self::Inventory => "Inventory",
+            Self::Recordings => "Recordings",
         }
     }
 
@@ -92,7 +92,7 @@ impl Tab {
     /// leaf's recordings need a profile switch, exactly like the admin tabs.
     #[must_use]
     pub(crate) fn serial_aggregation(self) -> bool {
-        self.is_admin() || matches!(self, Tab::Recordings)
+        self.is_admin() || matches!(self, Self::Recordings)
     }
 
     /// Admin tabs are root-scoped via `tctl`, not tied to the selected cluster.
@@ -100,7 +100,7 @@ impl Tab {
     pub(crate) fn is_admin(self) -> bool {
         matches!(
             self,
-            Tab::Users | Tab::Roles | Tab::Tokens | Tab::Bots | Tab::Inventory
+            Self::Users | Self::Roles | Self::Tokens | Self::Bots | Self::Inventory
         )
     }
 
@@ -116,10 +116,10 @@ impl Tab {
     /// operation not every user can perform, so it's gated like the admin tabs.
     #[must_use]
     pub(crate) fn admin_gated(self) -> bool {
-        self.admin_only() || matches!(self, Tab::Recordings)
+        self.admin_only() || matches!(self, Self::Recordings)
     }
 
-    pub(crate) fn next(self) -> Tab {
+    pub(crate) fn next(self) -> Self {
         let i = Self::ALL.iter().position(|t| *t == self).unwrap_or(0);
         Self::ALL
             .get((i + 1) % Self::ALL.len())
@@ -127,7 +127,7 @@ impl Tab {
             .unwrap_or(self)
     }
 
-    pub(crate) fn prev(self) -> Tab {
+    pub(crate) fn prev(self) -> Self {
         let n = Self::ALL.len();
         let i = Self::ALL.iter().position(|t| *t == self).unwrap_or(0);
         Self::ALL.get((i + n - 1) % n).copied().unwrap_or(self)
