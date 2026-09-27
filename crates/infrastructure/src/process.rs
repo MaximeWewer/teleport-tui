@@ -211,6 +211,37 @@ fn kill_tree(child: &mut Child) {
     let _ = child.wait();
 }
 
+#[cfg(test)]
+mod request_tests {
+    use super::{CommandOutcome, CommandRequest};
+
+    #[test]
+    fn unredacted_display_joins_bin_and_args_with_spaces() {
+        let req = CommandRequest::new(
+            "/usr/bin/tsh",
+            ["ls".to_owned(), "--format=json".to_owned()],
+        );
+        assert_eq!(req.unredacted_display(), "/usr/bin/tsh ls --format=json");
+        assert_eq!(
+            CommandRequest::new("tsh", Vec::new()).unredacted_display(),
+            "tsh"
+        );
+    }
+
+    #[test]
+    fn only_exit_code_zero_is_success() {
+        let outcome = |status| CommandOutcome {
+            status,
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        assert!(outcome(Some(0)).succeeded());
+        assert!(!outcome(Some(1)).succeeded());
+        // Killed by a signal: no exit code, never a success.
+        assert!(!outcome(None).succeeded());
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::{CommandRequest, run_with_timeout};
@@ -255,6 +286,62 @@ mod tests {
             "waited {:?}",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn a_missing_binary_is_a_spawn_error() {
+        let req = CommandRequest::new("/nonexistent/teleport-tui-test-bin", Vec::new());
+        let err = run_with_timeout(&req, Duration::from_secs(10)).expect_err("no such binary");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn args_are_passed_verbatim_without_a_shell() {
+        // Shell metacharacters in an argv element reach the program literally.
+        let req = CommandRequest::new(
+            "/bin/sh",
+            [
+                "-c".to_owned(),
+                r#"printf '%s' "$1""#.to_owned(),
+                "sh".to_owned(),
+                "a; echo pwned $(id) `id` | x".to_owned(),
+            ],
+        );
+        let out = run_with_timeout(&req, Duration::from_secs(10)).expect("runs");
+        assert_eq!(out.stdout, "a; echo pwned $(id) `id` | x");
+    }
+
+    #[test]
+    fn stdin_is_detached_so_a_reader_sees_eof() {
+        // `cat` would block forever on an inherited terminal stdin.
+        let out = run_with_timeout(&sh("cat; echo done"), Duration::from_secs(10)).expect("runs");
+        assert_eq!(out.stdout, "done\n");
+    }
+
+    #[test]
+    fn locale_is_pinned_to_c() {
+        let out = run_with_timeout(&sh("printf '%s' \"$LC_ALL\""), Duration::from_secs(10))
+            .expect("runs");
+        assert_eq!(out.stdout, "C");
+    }
+
+    #[test]
+    fn output_larger_than_the_pipe_buffer_does_not_deadlock() {
+        // ~1 MiB on each pipe, well past the usual 64 KiB pipe buffer.
+        let out = run_with_timeout(
+            &sh("head -c 1048576 /dev/zero; head -c 1048576 /dev/zero >&2"),
+            Duration::from_secs(20),
+        )
+        .expect("runs");
+        assert!(out.succeeded());
+        assert_eq!(out.stdout.len(), 1_048_576);
+        assert_eq!(out.stderr.len(), 1_048_576);
+    }
+
+    #[test]
+    fn invalid_utf8_output_is_decoded_lossily() {
+        let out = run_with_timeout(&sh(r"printf 'a\377b'"), Duration::from_secs(10)).expect("runs");
+        assert_eq!(out.stdout, "a\u{fffd}b");
     }
 
     #[test]
