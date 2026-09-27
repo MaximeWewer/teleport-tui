@@ -1,6 +1,7 @@
 //! The per-tab resource listings [`super::App`] holds for the scoped view: one
 //! typed vec per tab, plus the generic row/search/count views the update loop
 //! needs, so the Tab -> vec mapping lives here instead of in every caller.
+//! Also [`PickList`], the items + selection pair behind every popup list.
 
 use domain::admin::{AdminRole, AdminUser, Bot, Instance, ProvisionToken};
 use domain::node::SshNode;
@@ -8,8 +9,8 @@ use domain::recording::SessionRecording;
 use domain::request::AccessRequest;
 use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
 
-use super::Tab;
 use super::dispatch::Listing;
+use super::{Tab, clamp_step};
 
 /// The last loaded listing of every tab (empty until loaded).
 #[derive(Debug, Default)]
@@ -113,5 +114,77 @@ impl Listings {
             .filter(|(_, it)| keep(it.matches(needle)))
             .map(|(i, _)| i)
             .collect()
+    }
+}
+
+/// A popup list's items plus its selected row (pickers, MFA devices, active
+/// sessions, SSH forwards), kept together so the selection can't drift out of
+/// range of the items it points into.
+#[derive(Debug)]
+pub(crate) struct PickList<T> {
+    items: Vec<T>,
+    sel: usize,
+}
+
+impl<T> Default for PickList<T> {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            sel: 0,
+        }
+    }
+}
+
+impl<T> PickList<T> {
+    pub(crate) fn items(&self) -> &[T] {
+        &self.items
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    /// The selected row (0 when empty; see [`PickList::selected`]).
+    pub(crate) fn selected_index(&self) -> usize {
+        self.sel
+    }
+
+    pub(crate) fn selected(&self) -> Option<&T> {
+        self.items.get(self.sel)
+    }
+
+    /// Replace the items and select the first.
+    pub(crate) fn set(&mut self, items: Vec<T>) {
+        self.items = items;
+        self.sel = 0;
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.set(Vec::new());
+    }
+
+    pub(crate) fn push(&mut self, item: T) {
+        self.items.push(item);
+    }
+
+    /// Move the selection by one row, stopping at either end.
+    pub(crate) fn step(&mut self, forward: bool) {
+        self.sel = clamp_step(self.sel, self.items.len(), forward);
+    }
+
+    /// Pull the selection back inside the items (after they shrank).
+    pub(crate) fn clamp(&mut self) {
+        self.sel = self.sel.min(self.items.len().saturating_sub(1));
+    }
+
+    /// Remove and return the selected item, keeping the selection in range.
+    pub(crate) fn remove_selected(&mut self) -> Option<T> {
+        let removed = (self.sel < self.items.len()).then(|| self.items.remove(self.sel));
+        self.clamp();
+        removed
     }
 }

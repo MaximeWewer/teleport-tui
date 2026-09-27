@@ -330,11 +330,7 @@ impl App {
             KeyCode::Char('j') | KeyCode::Down => self.move_user_picker(true),
             KeyCode::Char('k') | KeyCode::Up => self.move_user_picker(false),
             KeyCode::Enter => {
-                if let Some(user) = self
-                    .user_picker
-                    .selected()
-                    .and_then(|i| self.user_choices.get(i).cloned())
-                {
+                if let Some(user) = self.user_choices.selected().cloned() {
                     let Mode::UserPicker(pending) = std::mem::replace(&mut self.mode, Mode::Normal)
                     else {
                         return Outcome::Continue;
@@ -545,10 +541,7 @@ impl App {
             KeyCode::Char('j') | KeyCode::Down => self.move_tool_picker(true),
             KeyCode::Char('k') | KeyCode::Up => self.move_tool_picker(false),
             KeyCode::Enter => {
-                let tool = self
-                    .tool_picker
-                    .selected()
-                    .and_then(|i| self.tool_choices.get(i).cloned());
+                let tool = self.tool_choices.selected().cloned();
                 if let Some(tool) = tool {
                     let Mode::ToolPicker {
                         cluster,
@@ -735,12 +728,8 @@ impl App {
                 self.mfa_devices.clear();
                 self.mode = Mode::Normal;
             }
-            KeyCode::Down | KeyCode::Char('j') if !self.mfa_devices.is_empty() => {
-                self.mfa_sel = clamp_step(self.mfa_sel, self.mfa_devices.len(), true);
-            }
-            KeyCode::Up | KeyCode::Char('k') if !self.mfa_devices.is_empty() => {
-                self.mfa_sel = clamp_step(self.mfa_sel, self.mfa_devices.len(), false);
-            }
+            KeyCode::Down | KeyCode::Char('j') => self.mfa_devices.step(true),
+            KeyCode::Up | KeyCode::Char('k') => self.mfa_devices.step(false),
             // Register a new device - interactive (tsh drives the authenticator).
             KeyCode::Char('a') => {
                 self.mfa_devices.clear();
@@ -752,7 +741,7 @@ impl App {
             }
             // Remove the selected device (confirm first).
             KeyCode::Char('d') => {
-                if let Some(name) = self.mfa_devices.get(self.mfa_sel).map(|d| d.name.clone()) {
+                if let Some(name) = self.mfa_devices.selected().map(|d| d.name.clone()) {
                     match DeviceName::try_from(name) {
                         Ok(name) => self.mode = Mode::ConfirmMfaRm(name),
                         Err(e) => self.report(&e),
@@ -793,16 +782,12 @@ impl App {
                 self.sessions.clear();
                 self.mode = Mode::Normal;
             }
-            KeyCode::Down | KeyCode::Char('j') if !self.sessions.is_empty() => {
-                self.sessions_sel = clamp_step(self.sessions_sel, self.sessions.len(), true);
-            }
-            KeyCode::Up | KeyCode::Char('k') if !self.sessions.is_empty() => {
-                self.sessions_sel = clamp_step(self.sessions_sel, self.sessions.len(), false);
-            }
+            KeyCode::Down | KeyCode::Char('j') => self.sessions.step(true),
+            KeyCode::Up | KeyCode::Char('k') => self.sessions.step(false),
             KeyCode::Enter => {
                 if let Some(id) = self
                     .sessions
-                    .get(self.sessions_sel)
+                    .selected()
                     .and_then(|s| SessionId::try_from(s.id.as_str()).ok())
                 {
                     self.sessions.clear();

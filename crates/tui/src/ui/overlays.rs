@@ -9,6 +9,7 @@ use super::*;
 pub(super) fn render_tool_picker(frame: &mut Frame, app: &mut App) {
     let items: Vec<ListItem> = app
         .tool_choices
+        .items()
         .iter()
         .map(|t| ListItem::new(Line::from(t.clone())))
         .collect();
@@ -22,12 +23,14 @@ pub(super) fn render_tool_picker(frame: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▶ ");
-    frame.render_stateful_widget(list, area, &mut app.tool_picker);
+    let mut state = ListState::default().with_selected(Some(app.tool_choices.selected_index()));
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 pub(super) fn render_user_picker(frame: &mut Frame, app: &mut App) {
     let items: Vec<ListItem> = app
         .user_choices
+        .items()
         .iter()
         .map(|u| ListItem::new(Line::from(u.clone())))
         .collect();
@@ -41,7 +44,8 @@ pub(super) fn render_user_picker(frame: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▶ ");
-    frame.render_stateful_widget(list, area, &mut app.user_picker);
+    let mut state = ListState::default().with_selected(Some(app.user_choices.selected_index()));
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 pub(super) fn render_picker(frame: &mut Frame, app: &mut App) {
@@ -197,11 +201,12 @@ pub(super) fn render_mfa(frame: &mut Frame, app: &App) {
         );
         return;
     }
-    // A stateful List (seeded from `mfa_sel`) so ratatui scrolls to keep the
+    // A stateful List (seeded from the popup selection) so ratatui scrolls to keep the
     // selected device visible when the list is longer than the popup - a plain
     // Paragraph would let the selection move off-screen out of reach.
     let items: Vec<ListItem> = app
         .mfa_devices
+        .items()
         .iter()
         .map(|d| {
             ListItem::new(vec![
@@ -222,7 +227,7 @@ pub(super) fn render_mfa(frame: &mut Frame, app: &App) {
         })
         .collect();
     let mut state = ListState::default();
-    state.select(Some(app.mfa_sel));
+    state.select(Some(app.mfa_devices.selected_index()));
     let list = List::new(items)
         .block(block)
         .highlight_style(
@@ -245,11 +250,12 @@ pub(super) fn render_sessions(frame: &mut Frame, app: &App) {
         );
         return;
     }
-    // A stateful List (seeded from `sessions_sel`) so ratatui scrolls to keep the
+    // A stateful List (seeded from the popup selection) so ratatui scrolls to keep the
     // selected session visible when the list overflows the popup - a plain
     // Paragraph would let the selection move off-screen out of reach.
     let items: Vec<ListItem> = app
         .sessions
+        .items()
         .iter()
         .map(|s| {
             ListItem::new(Line::from(vec![
@@ -265,7 +271,7 @@ pub(super) fn render_sessions(frame: &mut Frame, app: &App) {
         })
         .collect();
     let mut state = ListState::default();
-    state.select(Some(app.sessions_sel));
+    state.select(Some(app.sessions.selected_index()));
     let list = List::new(items)
         .block(block)
         .highlight_style(
@@ -292,8 +298,8 @@ pub(super) fn render_forwards(frame: &mut Frame, app: &App) {
             "No active forwards. Open one from an SSH node (o).",
         ));
     } else {
-        for (i, f) in app.forwards.iter().enumerate() {
-            let selected = i == app.forwards_sel;
+        for (i, f) in app.forwards.items().iter().enumerate() {
+            let selected = i == app.forwards.selected_index();
             let marker = if selected { "▶ " } else { "  " };
             let style = if selected {
                 Style::default()

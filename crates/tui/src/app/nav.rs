@@ -17,10 +17,8 @@ impl App {
         self.lists = Listings::default();
         self.invite_view = None;
         self.mfa_devices.clear();
-        self.mfa_sel = 0;
         self.mode = Mode::Normal;
         self.sessions.clear();
-        self.sessions_sel = 0;
         self.agg_rows.clear();
         self.agg_cache.clear();
         self.cache_key.clear();
@@ -214,26 +212,10 @@ impl App {
     }
 
     pub(super) fn move_tool_picker(&mut self, forward: bool) {
-        if self.tool_choices.is_empty() {
-            return;
-        }
-        let next = clamp_step(
-            self.tool_picker.selected().unwrap_or(0),
-            self.tool_choices.len(),
-            forward,
-        );
-        self.tool_picker.select(Some(next));
+        self.tool_choices.step(forward);
     }
 
     pub(super) fn move_user_picker(&mut self, forward: bool) {
-        if self.user_choices.is_empty() {
-            return;
-        }
-        let next = clamp_step(
-            self.user_picker.selected().unwrap_or(0),
-            self.user_choices.len(),
-            forward,
-        );
-        self.user_picker.select(Some(next));
+        self.user_choices.step(forward);
     }
 }

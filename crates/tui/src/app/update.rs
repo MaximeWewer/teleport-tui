@@ -105,8 +105,7 @@ impl App {
             },
             JobResult::Mfa(result) => match result {
                 Ok(devices) => {
-                    self.mfa_devices = devices;
-                    self.mfa_sel = 0;
+                    self.mfa_devices.set(devices);
                     self.status = Some(format!("{} MFA device(s)", self.mfa_devices.len()));
                     self.mode = Mode::ShowMfa;
                 }
@@ -114,8 +113,7 @@ impl App {
             },
             JobResult::Sessions(result) => match result {
                 Ok(sessions) => {
-                    self.sessions = sessions;
-                    self.sessions_sel = 0;
+                    self.sessions.set(sessions);
                     self.status = Some(format!("{} active session(s)", self.sessions.len()));
                     self.mode = Mode::ShowSessions;
                 }

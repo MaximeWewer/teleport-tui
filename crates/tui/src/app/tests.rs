@@ -428,7 +428,7 @@ fn ssh_with_multiple_logins_opens_user_picker() {
     // Two logins available -> dropdown, not direct connect.
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert!(matches!(app.mode, Mode::UserPicker(_)));
-    assert_eq!(app.user_choices, vec!["root", "admin"]);
+    assert_eq!(app.user_choices.items(), ["root", "admin"]);
     // pick the second login then connect
     app.on_key(press('j'));
     match app.on_key(KeyEvent::from(KeyCode::Enter)) {
@@ -532,7 +532,7 @@ fn kube_picks_user_then_tool_then_opens_auto_proxy() {
     // One kube user -> skip user picker; two tools -> tool picker opens.
     app.on_key(KeyEvent::from(KeyCode::Enter));
     assert!(matches!(app.mode, Mode::ToolPicker { .. }));
-    assert_eq!(app.tool_choices, vec!["shell", "k9s"]);
+    assert_eq!(app.tool_choices.items(), ["shell", "k9s"]);
     // pick k9s (second) -> background proxy + clean handoff (OpenKube)
     app.on_key(press('j'));
     match app.on_key(KeyEvent::from(KeyCode::Enter)) {
@@ -1460,10 +1460,10 @@ fn forwards_popup_lists_and_stops() {
     app.on_key(press('F'));
     assert_eq!(app.mode, Mode::Forwards);
     app.on_key(KeyEvent::from(KeyCode::Down)); // select second
-    assert_eq!(app.forwards_sel, 1);
+    assert_eq!(app.forwards.selected_index(), 1);
     app.on_key(press('d')); // stop it (kills the child)
     assert_eq!(app.forwards.len(), 1);
-    assert_eq!(app.forwards_sel, 0); // clamped
+    assert_eq!(app.forwards.selected_index(), 0); // clamped
     app.on_key(KeyEvent::from(KeyCode::Esc));
     assert_eq!(app.mode, Mode::Normal);
 }
@@ -1652,7 +1652,7 @@ fn mfa_key_shows_devices_popup() {
     app.on_key(press('M'));
     assert_eq!(app.mode, Mode::ShowMfa);
     assert_eq!(app.mfa_devices.len(), 1);
-    assert_eq!(app.mfa_devices[0].kind, "webauthn");
+    assert_eq!(app.mfa_devices.items()[0].kind, "webauthn");
     // Any key dismisses and clears the list.
     app.on_key(press('q'));
     assert_eq!(app.mode, Mode::Normal);
@@ -2040,6 +2040,23 @@ fn clamp_step_is_total_on_empty_list() {
     assert_eq!(clamp_step(0, 3, true), 1);
     assert_eq!(clamp_step(2, 3, true), 2);
     assert_eq!(clamp_step(0, 3, false), 0);
+}
+
+#[test]
+fn pick_list_keeps_its_selection_in_range() {
+    let mut list = listings::PickList::default();
+    list.step(true); // empty: stays put
+    assert_eq!(list.selected_index(), 0);
+    list.set(vec!["a", "b", "c"]);
+    list.step(true);
+    list.step(true);
+    list.step(true); // clamps at the last row
+    assert_eq!(list.selected(), Some(&"c"));
+    assert_eq!(list.remove_selected(), Some("c"));
+    assert_eq!(list.selected(), Some(&"b")); // pulled back in range
+    list.clear();
+    assert_eq!(list.remove_selected(), None);
+    assert_eq!(list.selected_index(), 0);
 }
 
 #[test]

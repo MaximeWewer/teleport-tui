@@ -623,8 +623,7 @@ impl App {
                 .first()
                 .map_or(Outcome::Continue, |u| self.connect_with_user(pending, u)),
             _ => {
-                self.user_choices = users;
-                self.user_picker.select(Some(0));
+                self.user_choices.set(users);
                 self.mode = Mode::UserPicker(pending);
                 Outcome::Continue
             }
@@ -692,8 +691,7 @@ impl App {
             self.mode = Mode::Normal;
             return Self::launch_kube(cluster, name, user, tool);
         }
-        self.tool_choices = tools;
-        self.tool_picker.select(Some(0));
+        self.tool_choices.set(tools);
         self.mode = Mode::ToolPicker {
             cluster,
             name,

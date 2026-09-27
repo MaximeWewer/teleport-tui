@@ -55,7 +55,7 @@ mod model;
 mod nav;
 mod update;
 use dispatch::{Dispatcher, Job, JobResult, Lane, agg_rows_of, err_row};
-use listings::Listings;
+use listings::{Listings, PickList};
 // Re-exported so the rest of the crate keeps using `crate::app::Tab` etc., and so
 // the sibling child modules' `use super::*` still resolves the model types.
 pub(crate) use model::*;
@@ -97,29 +97,22 @@ pub(crate) struct App {
     pub(crate) invite_view: Option<InviteView>,
     /// Held while the MFA-devices popup is open (`tsh mfa ls`). Public-key
     /// metadata only - not secret.
-    pub(crate) mfa_devices: Vec<MfaDevice>,
-    /// Selected row in the MFA popup; device awaiting `tsh mfa rm` confirmation.
-    pub(crate) mfa_sel: usize,
+    pub(crate) mfa_devices: PickList<MfaDevice>,
     /// Held while the active-sessions popup is open (`tsh sessions ls`).
-    pub(crate) sessions: Vec<ActiveSession>,
-    pub(crate) sessions_sel: usize,
+    pub(crate) sessions: PickList<ActiveSession>,
     /// In-progress `tctl users add` form.
     pub(crate) add_user_form: AddUserForm,
     /// In-progress `tsh kube exec` form (Kube tab).
     pub(crate) kube_exec_form: KubeExecForm,
-    pub(crate) user_choices: Vec<String>,
-    pub(crate) user_picker: ListState,
+    pub(crate) user_choices: PickList<String>,
     /// Configured Kubernetes launchers (e.g. shell, k9s).
     kube_tools: Vec<String>,
-    pub(crate) tool_choices: Vec<String>,
-    pub(crate) tool_picker: ListState,
+    pub(crate) tool_choices: PickList<String>,
     /// The currently running background app proxy (stopped on drop / Esc).
     pub(crate) proxy: Option<AppProxy>,
     /// Active background SSH port-forwards (`tsh ssh -L … -N`), each stopped on
     /// drop. Listed/stopped from the forwards popup.
-    pub(crate) forwards: Vec<Forward>,
-    /// Selected row in the forwards popup.
-    pub(crate) forwards_sel: usize,
+    pub(crate) forwards: PickList<Forward>,
     /// Per-tab cache marker: the context (cluster name, or `@admin`) the tab's
     /// data was last loaded for. A matching key means "show cache, don't refetch".
     cache_key: HashMap<Tab, String>,
@@ -245,20 +238,15 @@ impl App {
             notice: None,
             token_view: None,
             invite_view: None,
-            mfa_devices: Vec::new(),
-            mfa_sel: 0,
-            sessions: Vec::new(),
-            sessions_sel: 0,
+            mfa_devices: PickList::default(),
+            sessions: PickList::default(),
             add_user_form: AddUserForm::default(),
             kube_exec_form: KubeExecForm::default(),
-            user_choices: Vec::new(),
-            user_picker: ListState::default(),
+            user_choices: PickList::default(),
             kube_tools,
-            tool_choices: Vec::new(),
-            tool_picker: ListState::default(),
+            tool_choices: PickList::default(),
             proxy: None,
-            forwards: Vec::new(),
-            forwards_sel: 0,
+            forwards: PickList::default(),
             cache_key: HashMap::new(),
             login_form: LoginForm::default(),
             login_proxy,
@@ -376,25 +364,20 @@ impl App {
 
     /// Open the forwards popup (even when empty, so the user can confirm none run).
     pub(super) fn open_forwards(&mut self) {
-        self.forwards_sel = self.forwards_sel.min(self.forwards.len().saturating_sub(1));
+        self.forwards.clamp();
         self.mode = Mode::Forwards;
     }
 
     /// Stop (kill) the selected forward; dropping it terminates the tunnel.
     pub(super) fn stop_selected_forward(&mut self) {
-        if self.forwards_sel < self.forwards.len() {
-            let f = self.forwards.remove(self.forwards_sel);
+        if let Some(f) = self.forwards.remove_selected() {
             self.status = Some(format!("forward stopped: {}", f.spec));
         }
-        self.forwards_sel = self.forwards_sel.min(self.forwards.len().saturating_sub(1));
     }
 
     /// Move the forwards-popup selection by ±1 (clamped).
     pub(super) fn move_forward_sel(&mut self, forward: bool) {
-        if self.forwards.is_empty() {
-            return;
-        }
-        self.forwards_sel = clamp_step(self.forwards_sel, self.forwards.len(), forward);
+        self.forwards.step(forward);
     }
 
     /// Note that a handed-off session (e.g. kube shell) has ended.
