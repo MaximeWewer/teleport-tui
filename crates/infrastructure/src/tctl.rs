@@ -23,20 +23,23 @@ use domain::value::{ResourceName, RoleList, TokenTypes};
 use nanoserde::DeJson;
 use zeroize::Zeroizing;
 
-use crate::process::{CommandRequest, CommandRunner};
-use crate::tsh::{classify_failure, run_cli, sorted_labels};
+use crate::process::{CommandOutcome, CommandRequest, CommandRunner};
+use crate::tsh::{args, classify_failure, parse_json, run_cli, sorted_labels};
 
+/// `metadata.name` + optional labels (users, bots). The same shape as the
+/// `tsh` adapter's `MetaDto`, which nanoserde's derive can't share across
+/// modules (it rejects `pub(crate)`).
 #[derive(Debug, DeJson)]
-struct UserDto {
-    metadata: UserMetaDto,
-    spec: UserSpecDto,
-}
-
-#[derive(Debug, DeJson)]
-struct UserMetaDto {
+struct MetaDto {
     name: String,
     #[nserde(default)]
     labels: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, DeJson)]
+struct UserDto {
+    metadata: MetaDto,
+    spec: UserSpecDto,
 }
 
 #[derive(Debug, DeJson)]
@@ -70,58 +73,47 @@ impl<R: CommandRunner> TctlAdminRepository<R> {
         Self { runner, tctl }
     }
 
-    fn get(&self, kind: &str) -> Result<String, DomainError> {
-        let args = vec![
-            "get".to_owned(),
-            kind.to_owned(),
-            "--format=json".to_owned(),
-        ];
-        run_cli(&self.runner, &self.tctl, args, "TCTL_SPAWN_FAILED")
-    }
-
     /// Run a `tctl` subcommand and return stdout (non-secret listings).
-    fn run_json(&self, args: Vec<String>) -> Result<String, DomainError> {
+    fn run(&self, args: Vec<String>) -> Result<String, DomainError> {
         run_cli(&self.runner, &self.tctl, args, "TCTL_SPAWN_FAILED")
     }
 
-    /// Run a `users add`/`reset` command and extract the one-time setup URL.
-    fn invite(&self, user: &ResourceName, req: &CommandRequest) -> Result<InviteLink, DomainError> {
-        let outcome = self.runner.run(req).map_err(|e| DomainError::Backend {
+    /// Spawn `tctl <args>` and hand back the raw outcome; only a spawn failure
+    /// (not a non-zero exit) is an error here.
+    fn spawn(&self, args: Vec<String>) -> Result<CommandOutcome, DomainError> {
+        let req = CommandRequest::new(self.tctl.clone(), args);
+        self.runner.run(&req).map_err(|e| DomainError::Backend {
             code: "TCTL_SPAWN_FAILED",
             detail: e.to_string(),
-        })?;
+        })
+    }
+
+    /// Run a command whose stdout carries a secret (token, invite URL) and
+    /// return it in a zeroizing buffer, so it is scrubbed from memory as soon
+    /// as the caller has parsed it. On failure only the (redacted) stderr is
+    /// surfaced - never stdout.
+    fn run_secret(&self, args: Vec<String>) -> Result<Zeroizing<String>, DomainError> {
+        let outcome = self.spawn(args)?;
         if !outcome.succeeded() {
             return Err(classify_failure(&outcome.stderr));
         }
-        // stdout embeds the secret setup URL → scrub once it is extracted.
-        let stdout = Zeroizing::new(outcome.stdout);
-        parse_invite(user.as_str(), &stdout)
+        Ok(Zeroizing::new(outcome.stdout))
     }
 }
 
 impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
     fn list_users(&self) -> Result<Vec<AdminUser>, DomainError> {
-        parse_users(&self.get("users")?)
+        parse_users(&self.run(args(&["get", "users", "--format=json"]))?)
     }
     fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
-        parse_roles(&self.get("roles")?)
+        parse_roles(&self.run(args(&["get", "roles", "--format=json"]))?)
     }
 
     fn list_tokens(&self) -> Result<Vec<ProvisionToken>, DomainError> {
         // SECRET: for the `token` join method a token's *name* is the join
         // secret, so the JSON (every name included) is held in a zeroizing
         // buffer and scrubbed once parsed; names move into `SecretString`s.
-        let args = vec![
-            "tokens".to_owned(),
-            "ls".to_owned(),
-            "--format=json".to_owned(),
-        ];
-        let stdout = Zeroizing::new(run_cli(
-            &self.runner,
-            &self.tctl,
-            args,
-            "TCTL_SPAWN_FAILED",
-        )?);
+        let stdout = Zeroizing::new(self.run(args(&["tokens", "ls", "--format=json"]))?);
         parse_tokens(&stdout)
     }
 
@@ -133,48 +125,29 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
         // takes the name positionally - there is no stdin/file form - so this
         // brief exposure can't be avoided from here. The argv `String` is not
         // wiped either (std's `Command` keeps its own copies).
-        let args = vec!["tokens".to_owned(), "rm".to_owned(), token.to_owned()];
-        run_cli(&self.runner, &self.tctl, args, "TCTL_SPAWN_FAILED").map(|_| ())
+        self.run(args(&["tokens", "rm", token])).map(|_| ())
     }
 
     fn add_user(&self, user: &ResourceName, roles: &RoleList) -> Result<InviteLink, DomainError> {
         // `user` is a positional argv element (a `ResourceName`, so never
         // flag-like); roles use the `--roles=` form so a value can't be reparsed
-        // as a flag. No shell.
-        let req = CommandRequest::new(
-            self.tctl.clone(),
-            vec![
-                "users".to_owned(),
-                "add".to_owned(),
-                user.to_string(),
-                format!("--roles={roles}"),
-            ],
-        );
-        self.invite(user, &req)
+        // as a flag. No shell. stdout embeds the secret setup URL.
+        let roles = format!("--roles={roles}");
+        let stdout = self.run_secret(args(&["users", "add", user.as_str(), &roles]))?;
+        parse_invite(user.as_str(), &stdout)
     }
 
     fn reset_user(&self, user: &ResourceName) -> Result<InviteLink, DomainError> {
-        let req = CommandRequest::new(
-            self.tctl.clone(),
-            vec!["users".to_owned(), "reset".to_owned(), user.to_string()],
-        );
-        self.invite(user, &req)
+        let stdout = self.run_secret(args(&["users", "reset", user.as_str()]))?;
+        parse_invite(user.as_str(), &stdout)
     }
 
     fn list_bots(&self) -> Result<Vec<Bot>, DomainError> {
-        parse_bots(&self.run_json(vec![
-            "bots".to_owned(),
-            "ls".to_owned(),
-            "--format=json".to_owned(),
-        ])?)
+        parse_bots(&self.run(args(&["bots", "ls", "--format=json"]))?)
     }
 
     fn list_instances(&self) -> Result<Vec<Instance>, DomainError> {
-        parse_instances(&self.run_json(vec![
-            "inventory".to_owned(),
-            "ls".to_owned(),
-            "--format=json".to_owned(),
-        ])?)
+        parse_instances(&self.run(args(&["inventory", "ls", "--format=json"]))?)
     }
 
     fn can_admin(&self) -> Result<bool, DomainError> {
@@ -182,38 +155,14 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
         // auth-server admin access, so it gates the Admin tabs without listing
         // every role. A non-zero exit means "no admin"; a spawn failure or
         // timeout is an error (the probe couldn't run), so it can be reported.
-        let req = CommandRequest::new(self.tctl.clone(), vec!["status".to_owned()]);
-        let outcome = self.runner.run(&req).map_err(|e| DomainError::Backend {
-            code: "TCTL_SPAWN_FAILED",
-            detail: e.to_string(),
-        })?;
-        Ok(outcome.succeeded())
+        Ok(self.spawn(args(&["status"]))?.succeeded())
     }
 
     fn generate_token(&self, token_type: &TokenTypes) -> Result<GeneratedToken, DomainError> {
         // SECURITY: stdout contains the secret token; it is parsed and returned
-        // for one-time display, but never written to logs. On failure only the
-        // (redacted) stderr is surfaced - never stdout.
-        let req = CommandRequest::new(
-            self.tctl.clone(),
-            vec![
-                "tokens".to_owned(),
-                "add".to_owned(),
-                format!("--type={token_type}"),
-                "--format=json".to_owned(),
-            ],
-        );
-        let outcome = self.runner.run(&req).map_err(|e| DomainError::Backend {
-            code: "TCTL_SPAWN_FAILED",
-            detail: e.to_string(),
-        })?;
-        if !outcome.succeeded() {
-            return Err(classify_failure(&outcome.stderr));
-        }
-        // stdout carries the secret token verbatim. Hold it in a zeroizing
-        // buffer so the JSON (token included) is scrubbed from memory as soon
-        // as parsing extracts the fields - it must not linger in freed heap.
-        let stdout = Zeroizing::new(outcome.stdout);
+        // for one-time display, but never written to logs.
+        let token_type = format!("--type={token_type}");
+        let stdout = self.run_secret(args(&["tokens", "add", &token_type, "--format=json"]))?;
         parse_token(&stdout)
     }
 }
@@ -297,17 +246,10 @@ struct ProvisionTokenSpecDto {
 
 #[derive(Debug, DeJson)]
 struct BotDto {
-    metadata: BotMetaDto,
+    metadata: MetaDto,
     spec: BotSpecDto,
     #[nserde(default)]
     status: BotStatusDto,
-}
-
-#[derive(Debug, DeJson)]
-struct BotMetaDto {
-    name: String,
-    #[nserde(default)]
-    labels: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Default, DeJson)]
@@ -331,9 +273,7 @@ struct BotStatusDto {
 }
 
 fn parse_bots(stdout: &str) -> Result<Vec<Bot>, DomainError> {
-    let dtos: Vec<BotDto> = DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-        detail: e.to_string(),
-    })?;
+    let dtos: Vec<BotDto> = parse_json(stdout)?;
     let mut out = Vec::with_capacity(dtos.len());
     for d in dtos {
         // Skip (don't fail on) a row whose name we refuse: one odd entry must
@@ -354,13 +294,8 @@ fn parse_bots(stdout: &str) -> Result<Vec<Bot>, DomainError> {
 
 #[derive(Debug, DeJson)]
 struct InstanceDto {
-    metadata: InstanceMetaDto,
+    metadata: MetaDto,
     spec: InstanceSpecDto,
-}
-
-#[derive(Debug, DeJson)]
-struct InstanceMetaDto {
-    name: String,
 }
 
 #[derive(Debug, Default, DeJson)]
@@ -376,10 +311,7 @@ struct InstanceSpecDto {
 }
 
 fn parse_instances(stdout: &str) -> Result<Vec<Instance>, DomainError> {
-    let dtos: Vec<InstanceDto> =
-        DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-            detail: e.to_string(),
-        })?;
+    let dtos: Vec<InstanceDto> = parse_json(stdout)?;
     Ok(dtos
         .into_iter()
         .map(|d| Instance {
@@ -429,9 +361,7 @@ fn parse_tokens(stdout: &str) -> Result<Vec<ProvisionToken>, DomainError> {
 }
 
 fn parse_users(stdout: &str) -> Result<Vec<AdminUser>, DomainError> {
-    let dtos: Vec<UserDto> = DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-        detail: e.to_string(),
-    })?;
+    let dtos: Vec<UserDto> = parse_json(stdout)?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
         // Skip (don't fail on) a row whose name we refuse: one odd entry must
@@ -449,9 +379,7 @@ fn parse_users(stdout: &str) -> Result<Vec<AdminUser>, DomainError> {
 }
 
 fn parse_roles(stdout: &str) -> Result<Vec<AdminRole>, DomainError> {
-    let dtos: Vec<RoleDto> = DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-        detail: e.to_string(),
-    })?;
+    let dtos: Vec<RoleDto> = parse_json(stdout)?;
     let mut out = Vec::with_capacity(dtos.len());
     for dto in dtos {
         // Skip (don't fail on) a row whose name we refuse: one odd entry must
@@ -487,7 +415,6 @@ impl AdminRepository for UnavailableAdmin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process::CommandOutcome;
 
     /// Runner that fails every command with `stderr`.
     #[derive(Debug)]
