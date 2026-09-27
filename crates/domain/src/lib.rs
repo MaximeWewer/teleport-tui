@@ -25,5 +25,6 @@ pub mod profile;
 pub mod recording;
 pub mod request;
 pub mod resource;
+pub mod secret;
 pub mod session;
 pub mod value;

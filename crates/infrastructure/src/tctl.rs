@@ -18,6 +18,7 @@ use domain::admin::{
 };
 use domain::error::DomainError;
 use domain::port::AdminRepository;
+use domain::secret::SecretString;
 use domain::value::{ClusterName, ResourceName};
 use nanoserde::DeJson;
 use zeroize::Zeroizing;
@@ -110,24 +111,31 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
     }
 
     fn list_tokens(&self) -> Result<Vec<ProvisionToken>, DomainError> {
-        // The listing is non-secret (names/types/labels/expiry, exactly what
-        // `tctl tokens ls` prints), so no scrubbing is needed here.
+        // SECRET: for the `token` join method a token's *name* is the join
+        // secret, so the JSON (every name included) is held in a zeroizing
+        // buffer and scrubbed once parsed; names move into `SecretString`s.
         let args = vec![
             "tokens".to_owned(),
             "ls".to_owned(),
             "--format=json".to_owned(),
         ];
-        parse_tokens(&run_cli(
+        let stdout = Zeroizing::new(run_cli(
             &self.runner,
             &self.tctl,
             args,
             "TCTL_SPAWN_FAILED",
-        )?)
+        )?);
+        parse_tokens(&stdout)
     }
 
     fn remove_token(&self, token: &str) -> Result<(), DomainError> {
-        // `token` is the token's name (its identifier), passed as a positional
-        // argv element (no shell).
+        // `token` is the token's name, which for the `token` join method is the
+        // join secret. It is passed as a positional argv element (no shell).
+        // LIMITATION: argv is world-readable via /proc/<pid>/cmdline while
+        // `tctl` runs, and `tctl tokens rm` (like `tctl rm token/<name>`) only
+        // takes the name positionally - there is no stdin/file form - so this
+        // brief exposure can't be avoided from here. The argv `String` is not
+        // wiped either (std's `Command` keeps its own copies).
         let args = vec!["tokens".to_owned(), "rm".to_owned(), token.to_owned()];
         run_cli(&self.runner, &self.tctl, args, "TCTL_SPAWN_FAILED").map(|_| ())
     }
@@ -276,9 +284,10 @@ struct ProvisionTokenDto {
     spec: ProvisionTokenSpecDto,
 }
 
-#[derive(Debug, DeJson)]
+#[derive(DeJson)]
 struct ProvisionTokenMetaDto {
-    /// The token's name (its identifier) - the "Token" column of `tctl tokens ls`.
+    /// The token's name - the "Token" column of `tctl tokens ls`. For the
+    /// `token` join method it is the join secret (hence the masked `Debug`).
     name: String,
     #[nserde(default)]
     expires: String,
@@ -286,11 +295,25 @@ struct ProvisionTokenMetaDto {
     labels: Option<HashMap<String, String>>,
 }
 
+impl core::fmt::Debug for ProvisionTokenMetaDto {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ProvisionTokenMetaDto")
+            .field("name", &"<redacted>")
+            .field("expires", &self.expires)
+            .field("labels", &self.labels)
+            .finish()
+    }
+}
+
 #[derive(Debug, DeJson)]
 struct ProvisionTokenSpecDto {
     /// The token's type(s) (`Bot`, `Node`, …) - the "Type" column.
     #[nserde(default)]
     roles: Vec<String>,
+    /// `token` (the default when empty), `iam`, `github`, … - decides whether
+    /// the name is a secret.
+    #[nserde(default)]
+    join_method: String,
 }
 
 #[derive(Debug, DeJson)]
@@ -402,14 +425,16 @@ fn parse_invite(user: &str, stdout: &str) -> Result<InviteLink, DomainError> {
 }
 
 fn parse_tokens(stdout: &str) -> Result<Vec<ProvisionToken>, DomainError> {
+    // Generic error only: a parser message may quote input, i.e. a secret name.
     let dtos: Vec<ProvisionTokenDto> =
-        DeJson::deserialize_json(stdout).map_err(|e| DomainError::Parse {
-            detail: e.to_string(),
+        DeJson::deserialize_json(stdout).map_err(|_| DomainError::Parse {
+            detail: "could not parse token list JSON".to_owned(),
         })?;
     Ok(dtos
         .into_iter()
         .map(|d| ProvisionToken {
-            name: d.metadata.name,
+            name: SecretString::new(d.metadata.name),
+            join_method: d.spec.join_method,
             types: d.spec.roles,
             labels: sorted_labels(d.metadata.labels),
             expires: d.metadata.expires,
@@ -573,11 +598,13 @@ mod tests {
               "labels":{"team":"ci","teleport.dev/origin":"kubernetes"}},
              "spec":{"roles":["Bot"]}},
             {"metadata":{"name":"node-join"},
-             "spec":{"roles":["Kube","App"]}}
+             "spec":{"roles":["Kube","App"],"join_method":"iam"}}
         ]"#;
         let toks = parse_tokens(json).unwrap();
         assert_eq!(toks.len(), 2);
-        assert_eq!(toks[0].name, "tbot-ci");
+        assert_eq!(toks[0].name.expose(), "tbot-ci");
+        assert!(toks[0].name_is_secret()); // no join_method → `token` method
+        assert_eq!(toks[1].join_method, "iam");
         assert_eq!(toks[0].types, vec!["Bot"]);
         assert_eq!(
             toks[0].labels,

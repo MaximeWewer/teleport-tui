@@ -594,9 +594,10 @@ impl App {
         Outcome::Continue
     }
 
-    /// Dispatch removal of the selected token. The secret value is read from the
-    /// zeroizing store only for this call (and the resulting argv); it is never
-    /// logged. A leading `-` is rejected as a defensive argument-injection guard.
+    /// Dispatch removal of the selected token. The name (the join secret for
+    /// the `token` method) is cloned as a `SecretString`, so the job's copy is
+    /// wiped on drop too; it is never logged. A leading `-` is rejected as a
+    /// defensive argument-injection guard.
     fn confirm_token_rm(&mut self) {
         self.mode = Mode::Normal;
         let Some(name) = self
@@ -606,7 +607,7 @@ impl App {
         else {
             return;
         };
-        if name.is_empty() || name.starts_with('-') {
+        if name.is_empty() || name.expose().starts_with('-') {
             self.report(&DomainError::InvalidValue { field: "token" });
             return;
         }

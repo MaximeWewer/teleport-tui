@@ -2,6 +2,7 @@
 //! Editing is intentionally out of scope, except join-token generation.
 
 use crate::resource::{Resource, label_list};
+use crate::secret::SecretString;
 use crate::value::ResourceName;
 
 /// A freshly generated join token (`tctl tokens add`). The `token` field is a
@@ -47,16 +48,45 @@ impl core::fmt::Debug for InviteLink {
     }
 }
 
-/// An existing provision (join) token from `tctl tokens ls`. The listing shows
-/// only the same non-secret columns `tctl tokens ls` prints - the token's *name*
-/// (its identifier), its type(s), labels and expiry. A freshly *generated*
-/// token's secret value is a separate concern (see [`GeneratedToken`]).
+/// An existing provision (join) token from `tctl tokens ls`. For the `token`
+/// join method (the default, also used when `join_method` is empty) the token's
+/// *name* IS the secret a node presents to join, so it is held in a
+/// [`SecretString`] (masked `Debug`, wiped on drop) and shown masked in the
+/// table and detail views. Other join methods (`iam`, `github`, …) authenticate
+/// by a signed identity, so their name is a plain identifier and shown as is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionToken {
-    pub name: String,
+    pub name: SecretString,
+    pub join_method: String,
     pub types: Vec<String>,
     pub labels: Vec<(String, String)>,
     pub expires: String,
+}
+
+impl ProvisionToken {
+    /// Whether the name is a join secret (`token` join method, or unset).
+    #[must_use]
+    pub fn name_is_secret(&self) -> bool {
+        self.join_method.is_empty() || self.join_method == "token"
+    }
+
+    /// The name as it may be rendered: masked when it is a secret.
+    #[must_use]
+    pub fn display_name(&self) -> String {
+        if self.name_is_secret() {
+            self.name.masked()
+        } else {
+            self.name.expose().to_owned()
+        }
+    }
+
+    fn expires_or_never(&self) -> String {
+        if self.expires.is_empty() {
+            "never".to_owned()
+        } else {
+            self.expires.clone()
+        }
+    }
 }
 
 impl Resource for ProvisionToken {
@@ -65,36 +95,32 @@ impl Resource for ProvisionToken {
     }
     fn row(&self) -> Vec<String> {
         vec![
-            self.name.clone(),
+            self.display_name(),
             self.types.join(","),
             labels_blob(&self.labels),
-            if self.expires.is_empty() {
-                "never".to_owned()
-            } else {
-                self.expires.clone()
-            },
+            self.expires_or_never(),
         ]
     }
+    /// Matches what is shown: the masked name, never the hidden part of a secret.
     fn matches(&self, needle: &str) -> bool {
-        self.name.to_lowercase().contains(needle)
+        self.display_name().to_lowercase().contains(needle)
             || self.types.iter().any(|t| t.to_lowercase().contains(needle))
             || self.labels.iter().any(|(k, v)| {
                 k.to_lowercase().contains(needle) || v.to_lowercase().contains(needle)
             })
     }
     fn details(&self) -> Vec<(String, Vec<String>)> {
+        let join_method = if self.join_method.is_empty() {
+            "token".to_owned()
+        } else {
+            self.join_method.clone()
+        };
         vec![
-            ("TOKEN".to_owned(), vec![self.name.clone()]),
+            ("TOKEN".to_owned(), vec![self.display_name()]),
+            ("JOIN METHOD".to_owned(), vec![join_method]),
             ("TYPE".to_owned(), self.types.clone()),
             ("LABELS".to_owned(), label_list(&self.labels)),
-            (
-                "EXPIRES".to_owned(),
-                vec![if self.expires.is_empty() {
-                    "never".to_owned()
-                } else {
-                    self.expires.clone()
-                }],
-            ),
+            ("EXPIRES".to_owned(), vec![self.expires_or_never()]),
         ]
     }
 }
@@ -295,5 +321,34 @@ mod tests {
         );
         assert!(dbg.contains("<redacted>"));
         assert!(dbg.contains("bob"));
+    }
+
+    fn provision(name: &str, join_method: &str) -> ProvisionToken {
+        ProvisionToken {
+            name: SecretString::new(name.to_owned()),
+            join_method: join_method.to_owned(),
+            types: vec!["Node".to_owned()],
+            labels: vec![],
+            expires: String::new(),
+        }
+    }
+
+    #[test]
+    fn provision_token_name_is_masked_for_the_token_join_method() {
+        let secret = "a1b2c3d4e5f6a7b8c9d0";
+        for method in ["", "token"] {
+            let t = provision(secret, method);
+            let shown = format!("{:?} {:?} {:?}", t, t.row(), t.details());
+            assert!(!shown.contains(secret), "join secret leaked: {shown}");
+            assert_eq!(t.row()[0], "a1b2…");
+            assert!(t.matches("a1b2"));
+            assert!(!t.matches("e5f6"), "search must not probe the hidden part");
+        }
+    }
+
+    #[test]
+    fn provision_token_name_is_shown_for_identity_join_methods() {
+        let t = provision("github-ci-runners", "github");
+        assert_eq!(t.row()[0], "github-ci-runners");
     }
 }

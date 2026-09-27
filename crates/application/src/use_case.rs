@@ -154,8 +154,9 @@ impl<'a> GenerateToken<'a> {
     }
 }
 
-/// List active provision (join) tokens (admin). Each result carries a secret
-/// value - the caller must move it into zeroizing storage and never log it.
+/// List active provision (join) tokens (admin). A `token`-method token's name is
+/// its join secret: it arrives as a `SecretString` (masked, wiped on drop) and
+/// must never be logged.
 #[derive(Debug)]
 pub struct ListTokens<'a> {
     repo: &'a dyn AdminRepository,
@@ -174,7 +175,8 @@ impl<'a> ListTokens<'a> {
     }
 }
 
-/// Remove a provision token by its (secret) value (admin).
+/// Remove a provision token by its name (admin); for the `token` join method the
+/// name is the join secret.
 #[derive(Debug)]
 pub struct RemoveToken<'a> {
     repo: &'a dyn AdminRepository,

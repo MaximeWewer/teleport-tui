@@ -95,8 +95,9 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
     /// Returns [`DomainError`] on failure.
     fn generate_token(&self, token_type: &str) -> Result<GeneratedToken, DomainError>;
 
-    /// List active provision (join) tokens (`tctl tokens ls`). Each carries its
-    /// secret value - treat the result like a secret (zeroize, never log).
+    /// List active provision (join) tokens (`tctl tokens ls`). For the `token`
+    /// join method a token's name IS its secret, hence
+    /// [`ProvisionToken::name`] is a [`crate::secret::SecretString`]: never log it.
     ///
     /// # Errors
     /// Returns [`DomainError`] on failure. Defaults to "unsupported" so adapters
@@ -105,7 +106,8 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
         Err(DomainError::BinaryNotFound)
     }
 
-    /// Remove a provision token by its (secret) value (`tctl tokens rm <token>`).
+    /// Remove a provision token by its name (`tctl tokens rm <name>`); for the
+    /// `token` join method the name is the join secret.
     ///
     /// # Errors
     /// Returns [`DomainError`] on failure.

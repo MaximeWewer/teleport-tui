@@ -29,6 +29,7 @@ use domain::profile::Profile;
 use domain::recording::SessionRecording;
 use domain::request::AccessRequest;
 use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
+use domain::secret::SecretString;
 use domain::session::ActiveSession;
 use domain::value::Login;
 use infrastructure::config::Config as InfraConfig;
@@ -80,8 +81,9 @@ pub(crate) struct App {
     pub(crate) recordings: Vec<SessionRecording>,
     pub(crate) users: Vec<AdminUser>,
     pub(crate) roles: Vec<AdminRole>,
-    /// Provision tokens (Tokens tab) - a plain admin listing (name/type/labels/
-    /// expiry), exactly what `tctl tokens ls` prints. No secret in the listing.
+    /// Provision tokens (Tokens tab): name/type/labels/expiry from
+    /// `tctl tokens ls`. A `token`-method name is the join secret, held in a
+    /// `SecretString` (wiped on drop) and rendered masked.
     pub(crate) tokens: Vec<ProvisionToken>,
     /// Machine ID bots (Bots tab) and connected agent instances (Inventory tab).
     pub(crate) bots: Vec<Bot>,

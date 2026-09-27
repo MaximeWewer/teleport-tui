@@ -153,13 +153,15 @@ impl AdminRepository for FakeAdmin {
     fn list_tokens(&self) -> Result<Vec<ProvisionToken>, DomainError> {
         Ok(vec![
             ProvisionToken {
-                name: "tbot-ci".to_owned(),
+                name: SecretString::new("tbot-ci".to_owned()),
+                join_method: "github".to_owned(),
                 types: vec!["Bot".to_owned()],
                 labels: vec![("team".to_owned(), "ci".to_owned())],
                 expires: String::new(),
             },
             ProvisionToken {
-                name: "node-join".to_owned(),
+                name: SecretString::new("a1b2c3d4e5f6a7b8c9d0".to_owned()),
+                join_method: "token".to_owned(),
                 types: vec!["Node".to_owned()],
                 labels: vec![],
                 expires: "2026-07-02".to_owned(),
@@ -1686,13 +1688,20 @@ fn tokens_render_like_tctl_plain() {
     app.on_key(press('8'));
     assert_eq!(app.tab, Tab::Tokens);
     assert_eq!(app.tokens.len(), 2);
-    // Plain, non-secret columns: TOKEN(name)/TYPE/LABELS/EXPIRES, like
-    // `tctl tokens ls` - no masking, no reveal.
+    // TOKEN(name)/TYPE/LABELS/EXPIRES, like `tctl tokens ls`. A non-`token`
+    // join method's name is a plain identifier and shown as is...
     let row = app.tokens[0].row();
     assert_eq!(row[0], "tbot-ci"); // TOKEN = name
     assert_eq!(row[1], "Bot"); // TYPE
     assert_eq!(row[2], "team=ci"); // LABELS
     assert_eq!(row[3], "never"); // empty expiry → never
+    // ...but a `token`-method name is the join secret: masked in the table,
+    // the detail popup and Debug.
+    let secret = "a1b2c3d4e5f6a7b8c9d0";
+    let t = &app.tokens[1];
+    assert_eq!(t.row()[0], "a1b2…");
+    let shown = format!("{:?} {:?}", t.details(), t);
+    assert!(!shown.contains(secret), "join secret leaked: {shown}");
 }
 
 #[test]

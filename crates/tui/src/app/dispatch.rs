@@ -30,8 +30,9 @@ pub(super) enum Job {
     Mfa,
     /// List active sessions to join (`tsh sessions ls -c <cluster>`).
     Sessions(ClusterContext),
-    /// Remove a provision token by its secret value (`tctl tokens rm`).
-    RemoveToken(String),
+    /// Remove a provision token by its name (`tctl tokens rm`), a join secret
+    /// for the `token` method, so it travels as a wiped-on-drop `SecretString`.
+    RemoveToken(SecretString),
     /// Create a user with roles (`tctl users add`) → one-time invite URL.
     AddUser {
         user: String,
@@ -123,7 +124,7 @@ fn run_job(repos: &Repositories, job: Job) -> JobResult {
             JobResult::Sessions(ListSessions::new(repos.sessions.as_ref()).execute(&ctx))
         }
         Job::RemoveToken(token) => {
-            JobResult::TokenRemoved(RemoveToken::new(repos.admin.as_ref()).execute(&token))
+            JobResult::TokenRemoved(RemoveToken::new(repos.admin.as_ref()).execute(token.expose()))
         }
         Job::AddUser { user, roles } => {
             JobResult::Invite(AddUser::new(repos.admin.as_ref()).execute(&user, &roles))
