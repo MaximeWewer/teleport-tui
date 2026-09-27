@@ -429,7 +429,7 @@ fn paste_inserts_text_and_drops_control_chars() {
     app.on_paste("web");
     assert!(matches!(app.mode, Mode::Normal));
     assert_eq!(app.visible.len(), 3);
-    // In search, a multi-line paste lands in the query with the newline dropped —
+    // In search, a multi-line paste lands in the query with the newline dropped -
     // staying in Search (not submitted) proves the '\n' didn't act as Enter.
     app.on_key(press('/'));
     app.on_paste("we\nb");

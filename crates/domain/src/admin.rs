@@ -1,5 +1,6 @@
-//! Read-only administrative resources surfaced via `tctl get` (root cluster).
-//! Editing is intentionally out of scope, except join-token generation.
+//! Administrative resources surfaced via `tctl` (users, roles, join tokens,
+//! bots, inventory). Generic resource editing is out of scope; the only writes
+//! are join-token generation/removal and user creation/reset (invite links).
 
 use crate::resource::{Resource, label_list};
 use crate::secret::SecretString;

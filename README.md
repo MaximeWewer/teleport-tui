@@ -53,8 +53,12 @@ It's a front-end for a security product, so it behaves like one:
 - Secrets are never logged: tokens and invite URLs are held zeroized and shown once;
   interactive secrets (passwords, MFA) go straight to `tsh`. Cluster output is stripped of
   control/ANSI sequences before it's displayed or logged.
-- `#![forbid(unsafe_code)]`, no `unwrap`/`panic` in the codebase, subprocess timeouts, and
-  a strict clippy gate enforced in CI on Linux, macOS and Windows.
+- `unsafe_code = "forbid"` (workspace-wide `[lints]`), no `unwrap`/`panic` in the
+  codebase, subprocess timeouts, and a strict clippy gate enforced in CI on Linux, macOS
+  and Windows.
+- Background tunnels (`-N` forwards, `proxy db`, app proxies) are stopped when the TUI
+  exits, including on a closed terminal or a `kill` (SIGHUP/SIGTERM/SIGINT on Unix), so
+  no authenticated tunnel is left running behind it.
 
 ## Install & run
 

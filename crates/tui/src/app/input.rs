@@ -122,7 +122,7 @@ impl App {
     /// Drop the active tab's caches (scoped and aggregate) and refetch. Used by
     /// `r` and auto-refresh so they always pull fresh data.
     ///
-    /// Coalesces: if a load for the active tab is already in flight, do nothing —
+    /// Coalesces: if a load for the active tab is already in flight, do nothing -
     /// that load already yields fresh data. This stops mashing `r` (or a short
     /// auto-refresh interval over a large topology) from piling up overlapping
     /// `tsh` fan-outs / subprocesses.
@@ -685,7 +685,7 @@ impl App {
     }
 
     /// Validate and dispatch `tctl users add`. The invite URL returns via
-    /// [`JobResult::Invite`] and is shown in a one-time popup.
+    /// [`JobResult::Invite`](super::dispatch::JobResult::Invite) and is shown in a one-time popup.
     fn submit_add_user(&mut self) -> Outcome {
         let f = self.add_user_form.clone();
         let parsed = ResourceName::try_from(f.username.trim())

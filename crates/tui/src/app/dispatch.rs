@@ -494,7 +494,7 @@ impl Generations {
 /// The concurrency seam. Owns the repository ports and the background job/proxy
 /// channels, and knows how to run a [`Job`] - inline in `synchronous` mode (for
 /// deterministic tests) or on a worker thread otherwise. Pulling this out keeps
-/// the threading / channel / `Send + Sync` plumbing out of [`App`], which is
+/// the threading / channel / `Send + Sync` plumbing out of [`App`](super::App), which is
 /// left to own view and session state.
 #[derive(Debug)]
 pub(super) struct Dispatcher {

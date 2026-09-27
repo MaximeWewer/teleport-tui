@@ -117,7 +117,7 @@ pub(crate) fn run_interactive(
             out,
             SetForegroundColor(Color::DarkGrey),
             Print(format!(
-                "\r\n- command finished ({note}) · press any key to return —"
+                "\r\n- command finished ({note}) · press any key to return -"
             )),
             ResetColor,
         )?;

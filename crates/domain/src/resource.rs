@@ -13,7 +13,7 @@ pub trait Resource {
     /// One row of cell strings, aligned with [`Resource::columns`].
     fn row(&self) -> Vec<String>;
     /// Case-insensitive match against the search needle. CONTRACT: `needle` is
-    /// already lowercased by the caller, so impls lowercase only the haystack —
+    /// already lowercased by the caller, so impls lowercase only the haystack -
     /// this avoids re-lowercasing the needle once per item on every keystroke.
     fn matches(&self, needle: &str) -> bool;
 

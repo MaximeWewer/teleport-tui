@@ -197,7 +197,7 @@ impl<'a> RemoveToken<'a> {
     }
 }
 
-/// Create a user with roles (admin). The returned invite URL is a secret —
+/// Create a user with roles (admin). The returned invite URL is a secret -
 /// display once, never log.
 #[derive(Debug)]
 pub struct AddUser<'a> {

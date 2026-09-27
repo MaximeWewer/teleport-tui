@@ -414,7 +414,7 @@ impl App {
 
     /// Dispatch a single-cluster admin listing that must run against the selected
     /// cluster's profile - re-keys it (and restores root) around the `tctl` call
-    /// via [`Dispatcher::spawn_admin_scoped`]. Falls back to a plain dispatch if
+    /// via [`Dispatcher::spawn_admin_scoped`](super::dispatch::Dispatcher::spawn_admin_scoped). Falls back to a plain dispatch if
     /// the topology isn't known yet (nothing to re-key to).
     fn dispatch_admin_scoped(&mut self, job: Job) {
         let Some((cluster, root)) = self
@@ -443,7 +443,7 @@ impl App {
         self.visible.clear(); // count reads (0) until cached/fresh rows land
         self.table.select(None);
         let tab = self.tab;
-        // The cluster we were just viewing scoped already has its rows in memory —
+        // The cluster we were just viewing scoped already has its rows in memory -
         // promote them into the aggregate cache so we render them instantly instead
         // of refetching the cluster we just left.
         if let Some((name, rows)) = self.scoped_agg_seed(tab)

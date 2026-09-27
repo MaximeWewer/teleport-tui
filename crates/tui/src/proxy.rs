@@ -371,7 +371,7 @@ fn start_forward(
     Ok(child)
 }
 
-/// The local (bind-side) port of a `-L` spec, but only when it binds localhost —
+/// The local (bind-side) port of a `-L` spec, but only when it binds localhost -
 /// `port:host:hostport` (implicit localhost) or `127.0.0.1:port:host:hostport`.
 /// Returns `None` for a non-local bind (we can't confirm those by connecting).
 fn local_forward_port(spec: &str) -> Option<u16> {
@@ -552,7 +552,7 @@ pub(crate) fn stop_child(child: &mut Child) {
     let _ = child.wait();
 }
 
-/// Open the default browser at `url` (best-effort, per-OS, no shell metachars —
+/// Open the default browser at `url` (best-effort, per-OS, no shell metachars -
 /// the URL is a controlled localhost address).
 fn open_browser(url: &str) {
     let mut cmd = browser_command(url);

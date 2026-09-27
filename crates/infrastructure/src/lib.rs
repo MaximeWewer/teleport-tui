@@ -1,10 +1,12 @@
 //! Infrastructure layer - adapters that implement the domain ports.
 //!
 //! The only place that touches the outside world: subprocess exec
-//! ([`process`]), `tsh` JSON parsing + mapping ([`tsh`]), per-OS binary/path
-//! resolution ([`platform`]), structured NDJSON error export ([`logging`]),
-//! and redaction ([`redact`]). Security rules from PLAN.md (no-shell, input
-//! validation, output sanitisation, no secrets in logs/argv) live here.
+//! ([`process`]), the `tsh` and `tctl` adapters (JSON parsing + mapping,
+//! [`tsh`], [`tctl`]), CLI capability probing ([`capability`]), the config
+//! file ([`config`]), per-OS binary/path resolution ([`platform`]), structured
+//! NDJSON error export ([`logging`]) and redaction ([`redact`]). The security
+//! rules (no shell, input validation, output sanitisation, no secrets in logs)
+//! are enforced here.
 #![cfg_attr(
     test,
     allow(

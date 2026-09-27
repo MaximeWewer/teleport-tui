@@ -231,7 +231,7 @@ pub(crate) enum PendingConnect {
 
 /// UI configuration injected at startup: the editable defaults from
 /// `config.toml` (the Settings screen writes them back through the injected
-/// [`PreferencesStore`]) plus the probed `tsh` capabilities.
+/// [`PreferencesStore`](domain::port::PreferencesStore)) plus the probed `tsh` capabilities.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Settings {
     pub(crate) prefs: Preferences,
@@ -438,16 +438,15 @@ impl From<GeneratedToken> for TokenView {
     }
 }
 
-// The token field is intentionally masked (it is a secret); other fields are
-// omitted to keep Debug terse.
-#[allow(clippy::missing_fields_in_debug)]
+// The token field is intentionally masked (it is a secret).
 impl std::fmt::Debug for TokenView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TokenView")
             .field("token", &"<redacted>")
             .field("roles", &self.roles)
             .field("expires", &self.expires)
-            .finish_non_exhaustive()
+            .field("ca_pins", &self.ca_pins)
+            .finish()
     }
 }
 
@@ -468,7 +467,6 @@ impl From<InviteLink> for InviteView {
     }
 }
 
-#[allow(clippy::missing_fields_in_debug)]
 impl std::fmt::Debug for InviteView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InviteView")
