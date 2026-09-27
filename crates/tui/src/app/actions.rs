@@ -719,7 +719,7 @@ impl App {
         }
     }
 
-    /// Build `tsh db connect <name> -c <cluster> [--db-user=<user>]` from the
+    /// Build `tsh db connect --cluster=<cluster> <name> [--db-user=<user>]` from the
     /// typed db user (blank = let tsh choose the default user).
     pub(super) fn connect_db(&mut self) -> Outcome {
         let Mode::DbUser { cluster, name } = std::mem::replace(&mut self.mode, Mode::Normal) else {

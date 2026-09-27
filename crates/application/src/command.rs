@@ -58,22 +58,21 @@ pub fn logout() -> Vec<String> {
     vec!["logout".to_owned()]
 }
 
-/// `tsh ssh -c <cluster> <user>@<host>`.
+/// `tsh ssh --cluster=<cluster> <user>@<host>`.
 #[must_use]
 pub fn ssh(cluster: &ClusterName, user: &Login, host: &Hostname) -> Vec<String> {
     vec![
         "ssh".to_owned(),
-        "-c".to_owned(),
-        cluster.to_string(),
+        format!("--cluster={cluster}"),
         format!("{user}@{host}"),
     ]
 }
 
-/// `tsh ssh -c <cluster> [-L <spec>] [-N] [<user>@]<host> [<command>]`.
+/// `tsh ssh --cluster=<cluster> [--forward=<spec>] [-N] [<user>@]<host> [<command>]`.
 ///
 /// Extends [`ssh`] with the options form's extras: no `user` omits the login
-/// (tsh's default); a blank `forward` omits `-L`; `-N` (tunnel only, no remote
-/// shell) is emitted **only** for a pure forward - a `-L` with no `command` and
+/// (tsh's default); a blank `forward` omits `--forward`; `-N` (tunnel only, no remote
+/// shell) is emitted **only** for a pure forward - a `--forward` with no `command` and
 /// `tunnel_only` set. A non-empty `command` is appended as a single argv element
 /// (the remote shell parses it, as with plain `ssh host cmd`).
 #[must_use]
@@ -85,10 +84,9 @@ pub fn ssh_full(
     tunnel_only: bool,
     command: &str,
 ) -> Vec<String> {
-    let mut args = vec!["ssh".to_owned(), "-c".to_owned(), cluster.to_string()];
+    let mut args = vec!["ssh".to_owned(), format!("--cluster={cluster}")];
     if !forward.is_empty() {
-        args.push("-L".to_owned());
-        args.push(forward.to_owned());
+        args.push(format!("--forward={forward}"));
     }
     if tunnel_only && !forward.is_empty() && command.is_empty() {
         args.push("-N".to_owned());
@@ -100,7 +98,7 @@ pub fn ssh_full(
     args
 }
 
-/// `tsh db connect -c <cluster> <name> [--db-user=<user>]`. No `db_user` lets
+/// `tsh db connect --cluster=<cluster> <name> [--db-user=<user>]`. No `db_user` lets
 /// tsh pick the default user (no flag).
 #[must_use]
 pub fn db_connect(
@@ -111,8 +109,7 @@ pub fn db_connect(
     let mut args = vec![
         "db".to_owned(),
         "connect".to_owned(),
-        "-c".to_owned(),
-        cluster.to_string(),
+        format!("--cluster={cluster}"),
         name.to_string(),
     ];
     if let Some(db_user) = db_user {
@@ -121,7 +118,7 @@ pub fn db_connect(
     args
 }
 
-/// `tsh scp -c <cluster> [-r] <from> <to>`, where one endpoint is the remote
+/// `tsh scp --cluster=<cluster> [-r] <from> <to>`, where one endpoint is the remote
 /// spec `[login@]host:path` and the direction decides the from/to order.
 #[must_use]
 pub fn scp(
@@ -137,7 +134,7 @@ pub fn scp(
         || format!("{host}:{remote_path}"),
         |l| format!("{l}@{host}:{remote_path}"),
     );
-    let mut args = vec!["scp".to_owned(), "-c".to_owned(), cluster.to_string()];
+    let mut args = vec!["scp".to_owned(), format!("--cluster={cluster}")];
     if recursive {
         args.push("-r".to_owned());
     }
@@ -151,7 +148,7 @@ pub fn scp(
     args
 }
 
-/// `tsh db login -c <cluster> [--db-user=<user>] <name>` - retrieve a database
+/// `tsh db login --cluster=<cluster> [--db-user=<user>] <name>` - retrieve a database
 /// certificate (no interactive shell; the cert lands in `~/.tsh`). No
 /// `db_user` lets tsh use the database's own default user.
 #[must_use]
@@ -163,8 +160,7 @@ pub fn db_login(
     let mut args = vec![
         "db".to_owned(),
         "login".to_owned(),
-        "-c".to_owned(),
-        cluster.to_string(),
+        format!("--cluster={cluster}"),
     ];
     if let Some(db_user) = db_user {
         args.push(format!("--db-user={db_user}"));
@@ -173,56 +169,52 @@ pub fn db_login(
     args
 }
 
-/// `tsh db logout -c <cluster> <name>` - remove a database's stored credentials.
+/// `tsh db logout --cluster=<cluster> <name>` - remove a database's stored credentials.
 #[must_use]
 pub fn db_logout(cluster: &ClusterName, name: &ResourceName) -> Vec<String> {
     vec![
         "db".to_owned(),
         "logout".to_owned(),
-        "-c".to_owned(),
-        cluster.to_string(),
+        format!("--cluster={cluster}"),
         name.to_string(),
     ]
 }
 
-/// `tsh apps login -c <cluster> <name>` - retrieve a short-lived app certificate.
+/// `tsh apps login --cluster=<cluster> <name>` - retrieve a short-lived app certificate.
 #[must_use]
 pub fn app_login(cluster: &ClusterName, name: &ResourceName) -> Vec<String> {
     vec![
         "apps".to_owned(),
         "login".to_owned(),
-        "-c".to_owned(),
-        cluster.to_string(),
+        format!("--cluster={cluster}"),
         name.to_string(),
     ]
 }
 
-/// `tsh apps logout -c <cluster> <name>` - remove a stored app certificate.
+/// `tsh apps logout --cluster=<cluster> <name>` - remove a stored app certificate.
 #[must_use]
 pub fn app_logout(cluster: &ClusterName, name: &ResourceName) -> Vec<String> {
     vec![
         "apps".to_owned(),
         "logout".to_owned(),
-        "-c".to_owned(),
-        cluster.to_string(),
+        format!("--cluster={cluster}"),
         name.to_string(),
     ]
 }
 
-/// `tsh kube login -c <cluster> <kube>` - make `kube` the active Kubernetes
+/// `tsh kube login --cluster=<cluster> <kube>` - make `kube` the active Kubernetes
 /// context, a prerequisite for `tsh kube exec` (which has no cluster flag).
 #[must_use]
 pub fn kube_login(cluster: &ClusterName, kube: &ResourceName) -> Vec<String> {
     vec![
         "kube".to_owned(),
         "login".to_owned(),
-        "-c".to_owned(),
-        cluster.to_string(),
+        format!("--cluster={cluster}"),
         kube.to_string(),
     ]
 }
 
-/// `tsh kube exec [-c <container>] [-n <namespace>] -- <pod> <command…>` - run a
+/// `tsh kube exec [--container=…] [--namespace=…] -- <pod> <command…>` - run a
 /// command in a pod of the *current* kube context (set by [`kube_login`]). The
 /// `--` ends flag parsing so a command with leading-dash args is passed through
 /// verbatim. `command` is the already-tokenised argv. An absent container/
@@ -247,26 +239,24 @@ pub fn kube_exec(
     args
 }
 
-/// `tsh request show -c <cluster> <id>`.
+/// `tsh request show --cluster=<cluster> <id>`.
 #[must_use]
 pub fn request_show(cluster: &ClusterName, id: &RequestId) -> Vec<String> {
     vec![
         "request".to_owned(),
         "show".to_owned(),
-        "-c".to_owned(),
-        cluster.to_string(),
+        format!("--cluster={cluster}"),
         id.to_string(),
     ]
 }
 
-/// `tsh request create -c <cluster> --roles=<roles>`.
+/// `tsh request create --cluster=<cluster> --roles=<roles>`.
 #[must_use]
 pub fn request_create(cluster: &ClusterName, roles: &RoleList) -> Vec<String> {
     vec![
         "request".to_owned(),
         "create".to_owned(),
-        "-c".to_owned(),
-        cluster.to_string(),
+        format!("--cluster={cluster}"),
         format!("--roles={roles}"),
     ]
 }
@@ -303,7 +293,7 @@ pub fn request_drop(id: &RequestId) -> Vec<String> {
     vec!["request".to_owned(), "drop".to_owned(), id.to_string()]
 }
 
-/// `tsh request review (--approve|--deny) -c <cluster> <id>`.
+/// `tsh request review (--approve|--deny) --cluster=<cluster> <id>`.
 #[must_use]
 pub fn request_review(cluster: &ClusterName, id: &RequestId, approve: bool) -> Vec<String> {
     let verdict = if approve { "--approve" } else { "--deny" };
@@ -311,8 +301,7 @@ pub fn request_review(cluster: &ClusterName, id: &RequestId, approve: bool) -> V
         "request".to_owned(),
         "review".to_owned(),
         verdict.to_owned(),
-        "-c".to_owned(),
-        cluster.to_string(),
+        format!("--cluster={cluster}"),
         id.to_string(),
     ]
 }
@@ -449,15 +438,15 @@ mod tests {
     fn ssh_and_db_shapes() {
         assert_eq!(
             ssh(&c("root.example.com"), &l("admin"), &h("node-01")),
-            vec!["ssh", "-c", "root.example.com", "admin@node-01"]
+            vec!["ssh", "--cluster=root.example.com", "admin@node-01"]
         );
         assert_eq!(
             db_connect(&c("root"), &r("pg"), None),
-            vec!["db", "connect", "-c", "root", "pg"]
+            vec!["db", "connect", "--cluster=root", "pg"]
         );
         assert_eq!(
             db_connect(&c("root"), &r("pg"), Some(&i("reader"))),
-            vec!["db", "connect", "-c", "root", "pg", "--db-user=reader"]
+            vec!["db", "connect", "--cluster=root", "pg", "--db-user=reader"]
         );
     }
 
@@ -467,17 +456,15 @@ mod tests {
         // Plain: same shape as `ssh`.
         assert_eq!(
             ssh_full(&root, Some(&admin), &node, "", false, ""),
-            vec!["ssh", "-c", "root", "admin@node-01"]
+            vec!["ssh", "--cluster=root", "admin@node-01"]
         );
         // Pure tunnel: -L before host, -N added (no command).
         assert_eq!(
             ssh_full(&root, Some(&admin), &node, "8080:localhost:80", true, ""),
             vec![
                 "ssh",
-                "-c",
-                "root",
-                "-L",
-                "8080:localhost:80",
+                "--cluster=root",
+                "--forward=8080:localhost:80",
                 "-N",
                 "admin@node-01"
             ]
@@ -494,10 +481,8 @@ mod tests {
             ),
             vec![
                 "ssh",
-                "-c",
-                "root",
-                "-L",
-                "8080:localhost:80",
+                "--cluster=root",
+                "--forward=8080:localhost:80",
                 "admin@node-01",
                 "uptime"
             ]
@@ -505,7 +490,7 @@ mod tests {
         // No user omits the login (tsh default).
         assert_eq!(
             ssh_full(&root, None, &node, "", false, ""),
-            vec!["ssh", "-c", "root", "node-01"]
+            vec!["ssh", "--cluster=root", "node-01"]
         );
     }
 
@@ -524,8 +509,7 @@ mod tests {
             ),
             vec![
                 "scp",
-                "-c",
-                "root",
+                "--cluster=root",
                 "-r",
                 "alice@node-01:/etc/hosts",
                 "./hosts"
@@ -542,7 +526,7 @@ mod tests {
                 false,
                 false
             ),
-            vec!["scp", "-c", "root", "./x", "node-01:/tmp/x"]
+            vec!["scp", "--cluster=root", "./x", "node-01:/tmp/x"]
         );
     }
 
@@ -551,19 +535,25 @@ mod tests {
         let root = c("root");
         assert_eq!(
             request_show(&root, &id("abc-123")),
-            vec!["request", "show", "-c", "root", "abc-123"]
+            vec!["request", "show", "--cluster=root", "abc-123"]
         );
         assert_eq!(
             request_create(&root, &RoleList::try_from("dba,sre").unwrap()),
-            vec!["request", "create", "-c", "root", "--roles=dba,sre"]
+            vec!["request", "create", "--cluster=root", "--roles=dba,sre"]
         );
         assert_eq!(
             request_review(&root, &id("abc-123"), true),
-            vec!["request", "review", "--approve", "-c", "root", "abc-123"]
+            vec![
+                "request",
+                "review",
+                "--approve",
+                "--cluster=root",
+                "abc-123"
+            ]
         );
         assert_eq!(
             request_review(&root, &id("abc-123"), false),
-            vec!["request", "review", "--deny", "-c", "root", "abc-123"]
+            vec!["request", "review", "--deny", "--cluster=root", "abc-123"]
         );
         assert_eq!(
             request_drop(&id("abc-123")),
@@ -575,7 +565,7 @@ mod tests {
     fn kube_login_and_exec_shapes() {
         assert_eq!(
             kube_login(&c("root"), &r("prod")),
-            vec!["kube", "login", "-c", "root", "prod"]
+            vec!["kube", "login", "--cluster=root", "prod"]
         );
         // Bare command, no container/namespace.
         assert_eq!(
@@ -609,23 +599,23 @@ mod tests {
         let root = c("root");
         assert_eq!(
             db_login(&root, &r("pg"), None),
-            vec!["db", "login", "-c", "root", "pg"]
+            vec!["db", "login", "--cluster=root", "pg"]
         );
         assert_eq!(
             db_login(&root, &r("pg"), Some(&i("reader"))),
-            vec!["db", "login", "-c", "root", "--db-user=reader", "pg"]
+            vec!["db", "login", "--cluster=root", "--db-user=reader", "pg"]
         );
         assert_eq!(
             db_logout(&root, &r("pg")),
-            vec!["db", "logout", "-c", "root", "pg"]
+            vec!["db", "logout", "--cluster=root", "pg"]
         );
         assert_eq!(
             app_login(&root, &r("grafana")),
-            vec!["apps", "login", "-c", "root", "grafana"]
+            vec!["apps", "login", "--cluster=root", "grafana"]
         );
         assert_eq!(
             app_logout(&root, &r("grafana")),
-            vec!["apps", "logout", "-c", "root", "grafana"]
+            vec!["apps", "logout", "--cluster=root", "grafana"]
         );
     }
 
@@ -677,10 +667,8 @@ mod tests {
             ssh_forward(&root, None, &h("node-01"), "8080:localhost:80"),
             vec![
                 "ssh",
-                "-c",
-                "root",
-                "-L",
-                "8080:localhost:80",
+                "--cluster=root",
+                "--forward=8080:localhost:80",
                 "-N",
                 "node-01"
             ]

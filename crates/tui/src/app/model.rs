@@ -282,7 +282,7 @@ pub(crate) enum Outcome {
         label: String,
     },
     /// Run `tsh kube exec` in a pod. `tsh kube exec` has no cluster flag, so the
-    /// event loop first runs `tsh kube login -c <cluster> <kube>` to set the
+    /// event loop first runs `tsh kube login --cluster=<cluster> <kube>` to set the
     /// active context, then hands off the interactive exec.
     KubeExec {
         cluster: ClusterName,

@@ -347,7 +347,7 @@ fn ssh_with_multiple_logins_opens_user_picker() {
     app.on_key(press('j'));
     match app.on_key(KeyEvent::from(KeyCode::Enter)) {
         Outcome::Run { args, .. } => {
-            assert_eq!(args, vec!["ssh", "-c", "root.example", "admin@web-01"]);
+            assert_eq!(args, vec!["ssh", "--cluster=root.example", "admin@web-01"]);
         }
         other => panic!("expected Run, got {other:?}"),
     }
@@ -411,8 +411,7 @@ fn db_prompts_user_then_connects() {
             vec![
                 "db",
                 "connect",
-                "-c",
-                "root.example",
+                "--cluster=root.example",
                 "pg-main",
                 "--db-user=readonly"
             ]
@@ -430,7 +429,10 @@ fn db_blank_user_connects_with_default() {
     // blank user -> no --db-user flag
     match app.on_key(KeyEvent::from(KeyCode::Enter)) {
         Outcome::Run { args, .. } => {
-            assert_eq!(args, vec!["db", "connect", "-c", "root.example", "pg-main"]);
+            assert_eq!(
+                args,
+                vec!["db", "connect", "--cluster=root.example", "pg-main"]
+            );
         }
         other => panic!("expected Run, got {other:?}"),
     }
@@ -1037,7 +1039,7 @@ fn all_clusters_aggregate_merges_and_connects_directly() {
     match app.on_key(KeyEvent::from(KeyCode::Enter)) {
         Outcome::Run { args, .. } => {
             // connects on the row's own cluster, not the selected one.
-            assert_eq!(args, vec!["ssh", "-c", "root.example", "root@web-01"]);
+            assert_eq!(args, vec!["ssh", "--cluster=root.example", "root@web-01"]);
         }
         other => panic!("expected Run, got {other:?}"),
     }
@@ -1386,8 +1388,7 @@ fn scp_download_builds_remote_to_local() {
             args,
             vec![
                 "scp",
-                "-c",
-                "root.example",
+                "--cluster=root.example",
                 "root@web-01:/etc/hosts",
                 "./hosts"
             ]
@@ -1478,7 +1479,7 @@ fn ssh_options_one_off_command_suppresses_tunnel_flag() {
         Outcome::RunCommand { args, .. } => {
             assert_eq!(
                 args,
-                vec!["ssh", "-c", "root.example", "root@web-01", "uptime"]
+                vec!["ssh", "--cluster=root.example", "root@web-01", "uptime"]
             );
         }
         other => panic!("expected RunCommand, got {other:?}"),
@@ -1510,8 +1511,7 @@ fn scp_upload_recursive_swaps_direction() {
             args,
             vec![
                 "scp",
-                "-c",
-                "root.example",
+                "--cluster=root.example",
                 "-r",
                 "./dist",
                 "root@web-01:/opt/app"
@@ -1731,13 +1731,19 @@ fn db_and_app_cert_lifecycle_keys() {
     assert_eq!(app.tab, Tab::Db);
     match app.on_key(press('l')) {
         Outcome::Run { args, .. } => {
-            assert_eq!(args, vec!["db", "login", "-c", "root.example", "pg-main"]);
+            assert_eq!(
+                args,
+                vec!["db", "login", "--cluster=root.example", "pg-main"]
+            );
         }
         other => panic!("expected db login Run, got {other:?}"),
     }
     match app.on_key(press('u')) {
         Outcome::Run { args, .. } => {
-            assert_eq!(args, vec!["db", "logout", "-c", "root.example", "pg-main"]);
+            assert_eq!(
+                args,
+                vec!["db", "logout", "--cluster=root.example", "pg-main"]
+            );
         }
         other => panic!("expected db logout Run, got {other:?}"),
     }
@@ -1747,7 +1753,7 @@ fn db_and_app_cert_lifecycle_keys() {
     match app.on_key(press('l')) {
         Outcome::Run { args, .. } => {
             assert_eq!(args[0..2], ["apps", "login"]);
-            assert_eq!(args[2..4], ["-c", "root.example"]);
+            assert_eq!(args[2], "--cluster=root.example");
         }
         other => panic!("expected apps login Run, got {other:?}"),
     }
@@ -1932,7 +1938,7 @@ fn default_login_skips_picker() {
     // Enter on a node connects directly as the default login (no picker).
     match app.on_key(KeyEvent::from(KeyCode::Enter)) {
         Outcome::Run { args, .. } => {
-            assert_eq!(args, vec!["ssh", "-c", "root.example", "ubuntu@web-01"]);
+            assert_eq!(args, vec!["ssh", "--cluster=root.example", "ubuntu@web-01"]);
         }
         other => panic!("expected direct Run, got {other:?}"),
     }
@@ -1995,8 +2001,7 @@ fn requests_tab_approve_and_create() {
                 "request",
                 "review",
                 "--approve",
-                "-c",
-                "root.example",
+                "--cluster=root.example",
                 "req-0001"
             ]
         ),
@@ -2013,8 +2018,7 @@ fn requests_tab_approve_and_create() {
             vec![
                 "request",
                 "create",
-                "-c",
-                "root.example",
+                "--cluster=root.example",
                 "--roles=admin,dba"
             ]
         ),
