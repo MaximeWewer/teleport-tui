@@ -192,4 +192,90 @@ mod tests {
             Some(abs_dir.join("Cargo.toml"))
         );
     }
+
+    /// A fresh scratch dir, unique per test and process.
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ttui-platform-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn path_lookup_takes_the_first_file_in_order_and_skips_directories() {
+        let root = scratch("order");
+        let (a, b, c) = (root.join("a"), root.join("b"), root.join("c"));
+        for d in [&a, &b, &c] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        // In `a`, `tsh` is a directory: not a candidate.
+        std::fs::create_dir_all(a.join("tsh")).unwrap();
+        std::fs::write(b.join("tsh"), "").unwrap();
+        std::fs::write(c.join("tsh"), "").unwrap();
+        let path = std::env::join_paths([&a, &b, &c]).unwrap();
+        assert_eq!(find_in_path(&path, "tsh"), Some(b.join("tsh")));
+        assert_eq!(find_in_path(&path, "tctl"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn override_must_be_an_absolute_existing_file() {
+        let root = scratch("override");
+        let bin = root.join("tsh");
+        std::fs::write(&bin, "").unwrap();
+        assert_eq!(locate_named(Some(bin.clone()), "tsh").unwrap(), bin);
+        // The override wins even when the name differs from the default.
+        assert_eq!(locate_tctl(Some(bin.clone())).unwrap(), bin);
+
+        let rejected = [
+            root.join("missing"),
+            root.clone(),                // a directory
+            PathBuf::from("Cargo.toml"), // exists in the cwd, but relative
+        ];
+        for p in rejected {
+            assert!(
+                matches!(
+                    locate_named(Some(p.clone()), "tsh"),
+                    Err(DomainError::BinaryNotFound)
+                ),
+                "{p:?} must be rejected"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn binary_names_follow_the_os() {
+        let exe = if cfg!(windows) { ".exe" } else { "" };
+        assert_eq!(tsh_binary_name(), format!("tsh{exe}"));
+        assert_eq!(tctl_binary_name(), format!("tctl{exe}"));
+    }
+
+    #[test]
+    fn data_paths_end_with_the_app_dir() {
+        assert!(error_log_path().ends_with("teleport-tui/errors.jsonl"));
+        assert!(config_path().ends_with("teleport-tui/config.toml"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restrict_sets_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+
+        let root = scratch("perms");
+        let file = root.join("errors.jsonl");
+        std::fs::write(&file, "").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        restrict_file(&file);
+        restrict_dir(&root);
+        assert_eq!(mode(&file), 0o600);
+        assert_eq!(mode(&root), 0o700);
+
+        // Best-effort: a missing path is silently ignored.
+        restrict_file(&root.join("missing"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
