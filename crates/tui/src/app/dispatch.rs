@@ -70,6 +70,9 @@ pub(super) enum JobResult {
     Invite(Result<InviteLink, AppError>),
     Token(Result<GeneratedToken, AppError>),
     AdminAllowed(bool),
+    /// The admin-rights probe could not run at all (spawn failure / timeout):
+    /// reported, then treated as "no admin rights".
+    AdminProbeFailed(AppError),
     /// One cluster's slice of a concurrent (`tsh -c`) aggregate. Carries `tab` +
     /// `cluster` so it caches per-cluster even after the user navigates away.
     Aggregate {
@@ -131,7 +134,10 @@ fn run_job(repos: &Repositories, job: Job) -> JobResult {
         Job::GenerateToken(ty) => {
             JobResult::Token(GenerateToken::new(repos.admin.as_ref()).execute(&ty))
         }
-        Job::AdminProbe => JobResult::AdminAllowed(repos.admin.can_admin()),
+        Job::AdminProbe => match repos.admin.can_admin() {
+            Ok(ok) => JobResult::AdminAllowed(ok),
+            Err(e) => JobResult::AdminProbeFailed(e.into()),
+        },
         Job::Aggregate { tab, ctx } => {
             let cluster = ctx.name.to_string();
             let rows = aggregate_rows(repos, tab, &ctx);
@@ -163,7 +169,7 @@ fn failed_job(job: Job, e: AppError) -> JobResult {
         Job::RemoveToken(_) => JobResult::TokenRemoved(Err(e)),
         Job::AddUser { .. } | Job::ResetUser(_) => JobResult::Invite(Err(e)),
         Job::GenerateToken(_) => JobResult::Token(Err(e)),
-        Job::AdminProbe => JobResult::AdminAllowed(false),
+        Job::AdminProbe => JobResult::AdminProbeFailed(e),
         Job::Aggregate { tab, ctx } => JobResult::Aggregate {
             tab,
             cluster: ctx.name.to_string(),

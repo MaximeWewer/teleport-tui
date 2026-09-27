@@ -80,18 +80,10 @@ impl App {
             JobResult::Clusters(Err(e)) | JobResult::Status(Err(e)) | JobResult::Token(Err(e)) => {
                 self.report(&e);
             }
-            JobResult::AdminAllowed(ok) => {
-                self.admin_allowed = ok;
-                self.admin_probed = true;
-                // The admin tabs are warmed optimistically by the Clusters handler
-                // (in parallel with this slow probe), so no prefetch is needed
-                // here - that would only duplicate the in-flight ~3s tctl calls.
-                if !ok && self.tab.admin_gated() && !self.admin_group_reachable() {
-                    // Rights denied *on the root cluster* while on an Admin/Recordings
-                    // tab → fall back to SSH. A leaf-profile denial is inconclusive
-                    // (tctl can't target a leaf), so the tab stays put there.
-                    self.switch_tab(Tab::Ssh);
-                }
+            JobResult::AdminAllowed(ok) => self.apply_admin_allowed(ok),
+            JobResult::AdminProbeFailed(e) => {
+                self.report(&e);
+                self.apply_admin_allowed(false);
             }
             JobResult::TokenRemoved(result) => match result {
                 Ok(()) => {
@@ -156,6 +148,21 @@ impl App {
             error.code(),
             error.message()
         ));
+    }
+
+    /// Apply the admin-rights probe's verdict.
+    fn apply_admin_allowed(&mut self, ok: bool) {
+        self.admin_allowed = ok;
+        self.admin_probed = true;
+        // The admin tabs are warmed optimistically by the Clusters handler
+        // (in parallel with this slow probe), so no prefetch is needed
+        // here - that would only duplicate the in-flight ~3s tctl calls.
+        if !ok && self.tab.admin_gated() && !self.admin_group_reachable() {
+            // Rights denied *on the root cluster* while on an Admin/Recordings
+            // tab → fall back to SSH. A leaf-profile denial is inconclusive
+            // (tctl can't target a leaf), so the tab stays put there.
+            self.switch_tab(Tab::Ssh);
+        }
     }
 
     /// Apply one cluster's slice of a concurrent (`tsh -c`) fan-out. An `Err`
@@ -250,6 +257,7 @@ impl App {
             | JobResult::Mfa(_)
             | JobResult::Sessions(_)
             | JobResult::AdminAllowed(_)
+            | JobResult::AdminProbeFailed(_)
             // These variants are routed directly in `apply`; reaching here would
             // be a routing bug - degrade to a no-op load rather than panicking.
             | JobResult::Aggregate { .. }

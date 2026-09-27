@@ -171,12 +171,17 @@ impl<R: CommandRunner> AdminRepository for TctlAdminRepository<R> {
         ])?)
     }
 
-    fn can_admin(&self) -> bool {
+    fn can_admin(&self) -> Result<bool, DomainError> {
         // Lightweight probe: `tctl status` succeeds only for an identity with
         // auth-server admin access, so it gates the Admin tabs without listing
-        // every role. A spawn failure (tctl missing) also reads as "no admin".
+        // every role. A non-zero exit means "no admin"; a spawn failure or
+        // timeout is an error (the probe couldn't run), so it can be reported.
         let req = CommandRequest::new(self.tctl.clone(), vec!["status".to_owned()]);
-        self.runner.run(&req).is_ok_and(|o| o.succeeded())
+        let outcome = self.runner.run(&req).map_err(|e| DomainError::Backend {
+            code: "TCTL_SPAWN_FAILED",
+            detail: e.to_string(),
+        })?;
+        Ok(outcome.succeeded())
     }
 
     fn select_cluster(&self, cluster: &str) -> Result<(), DomainError> {
@@ -502,6 +507,38 @@ mod tests {
             DomainError::Backend { detail, .. } => assert!(detail.contains("connection refused")),
             other => panic!("expected Backend, got {other:?}"),
         }
+    }
+
+    /// Runner whose spawn itself fails (binary not executable, timeout, ...).
+    #[derive(Debug)]
+    struct SpawnFailRunner;
+    impl CommandRunner for SpawnFailRunner {
+        fn run(&self, _req: &CommandRequest) -> std::io::Result<CommandOutcome> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "permission denied",
+            ))
+        }
+    }
+
+    #[test]
+    fn can_admin_distinguishes_no_rights_from_probe_failure() {
+        let denied = TctlAdminRepository::new(
+            FailingRunner {
+                stderr: "access denied",
+            },
+            "tctl".into(),
+            "tsh".into(),
+        );
+        assert!(!denied.can_admin().unwrap());
+        let broken = TctlAdminRepository::new(SpawnFailRunner, "tctl".into(), "tsh".into());
+        assert!(matches!(
+            broken.can_admin(),
+            Err(DomainError::Backend {
+                code: "TCTL_SPAWN_FAILED",
+                ..
+            })
+        ));
     }
 
     #[test]

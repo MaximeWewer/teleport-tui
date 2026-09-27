@@ -151,9 +151,13 @@ pub trait AdminRepository: std::fmt::Debug + Send + Sync {
     /// `tctl`-scoped admin resources? The UI hides the whole Admin menu group
     /// when this is `false`. Defaults to probing via [`AdminRepository::list_roles`];
     /// adapters may override with a lighter-weight check.
-    #[must_use]
-    fn can_admin(&self) -> bool {
-        self.list_roles().is_ok()
+    ///
+    /// # Errors
+    /// Returns [`DomainError`] when the probe itself could not run (e.g. the
+    /// binary failed to spawn or timed out), as opposed to `Ok(false)` for an
+    /// identity that simply lacks admin rights.
+    fn can_admin(&self) -> Result<bool, DomainError> {
+        Ok(self.list_roles().is_ok())
     }
 
     /// Select the Teleport `cluster` (root or a trusted leaf under the current

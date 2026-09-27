@@ -1912,3 +1912,33 @@ fn startup_warning_is_shown_until_the_next_key() {
     app.warn_startup(&[]);
     assert!(app.notice.is_none());
 }
+
+/// Admin whose rights probe cannot run (e.g. `tctl` fails to spawn).
+#[derive(Debug)]
+struct BrokenProbeAdmin;
+impl AdminRepository for BrokenProbeAdmin {
+    fn list_users(&self) -> Result<Vec<AdminUser>, DomainError> {
+        Ok(vec![])
+    }
+    fn list_roles(&self) -> Result<Vec<AdminRole>, DomainError> {
+        Ok(vec![])
+    }
+    fn generate_token(&self, _t: &str) -> Result<GeneratedToken, DomainError> {
+        Err(DomainError::BinaryNotFound)
+    }
+    fn can_admin(&self) -> Result<bool, DomainError> {
+        Err(DomainError::Backend {
+            code: "TCTL_SPAWN_FAILED",
+            detail: "permission denied".to_owned(),
+        })
+    }
+}
+
+#[test]
+fn failed_admin_probe_is_reported_not_mistaken_for_no_rights() {
+    let app = test_app_with_admin(Box::new(BrokenProbeAdmin));
+    assert!(app.admin_probed);
+    assert!(!app.admin_allowed);
+    let status = app.status.as_deref().unwrap_or("");
+    assert!(status.contains("TCTL_SPAWN_FAILED"), "{status}");
+}
