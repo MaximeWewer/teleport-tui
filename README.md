@@ -84,10 +84,10 @@ sudo install -m 755 teleport-tui /usr/local/bin/    # all users; on PATH by defa
 teleport-tui
 ```
 
-**macOS - Apple Silicon** (`…-macos-arm64.tar.gz`)
+**macOS - Apple Silicon and Intel** (`…-macos-universal.tar.gz`, one universal binary)
 
 ```bash
-tar xzf teleport-tui-*-macos-arm64.tar.gz
+tar xzf teleport-tui-*-macos-universal.tar.gz
 xattr -d com.apple.quarantine teleport-tui 2>/dev/null || true   # clear Gatekeeper flag
 sudo install -m 755 teleport-tui /usr/local/bin/
 teleport-tui
