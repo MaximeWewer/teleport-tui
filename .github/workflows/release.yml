@@ -164,7 +164,7 @@ jobs:
             lipo -create -output target/universal-apple-darwin/release/teleport-tui \
               target/aarch64-apple-darwin/release/teleport-tui \
               target/x86_64-apple-darwin/release/teleport-tui
-            lipo -verify_arch target/universal-apple-darwin/release/teleport-tui arm64 x86_64
+            lipo target/universal-apple-darwin/release/teleport-tui -verify_arch arm64 x86_64
             lipo -info target/universal-apple-darwin/release/teleport-tui
           else
             cargo build --release --bin teleport-tui --target ${{ matrix.target }}
