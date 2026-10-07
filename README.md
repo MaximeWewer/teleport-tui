@@ -115,8 +115,13 @@ teleport-tui
 ```bash
 cargo run --release
 # or build the binary:
-cargo build --release && ./target/release/teleport-tui
+cargo build --release && ./target/x86_64-unknown-linux-musl/release/teleport-tui
 ```
+
+On Linux the build is a fully static musl binary by default (set in `.cargo/config.toml`;
+the target is installed automatically through `rust-toolchain.toml`), so it has no glibc
+dependency and runs on any distribution. On macOS or Windows, build for the native target
+instead, e.g. `CARGO_BUILD_TARGET=aarch64-apple-darwin cargo build --release`.
 
 Needs Rust 1.98+ (pinned via `rust-toolchain.toml`).
 

@@ -1,0 +1,6 @@
+# Default to a fully static musl binary on Linux: no glibc dependency, so the
+# same build runs on any distribution regardless of its libc version.
+# On macOS/Windows hosts, override with the native triple, e.g.
+#   CARGO_BUILD_TARGET=aarch64-apple-darwin cargo build --release
+[build]
+target = "x86_64-unknown-linux-musl"
