@@ -4,3 +4,8 @@
 #   CARGO_BUILD_TARGET=aarch64-apple-darwin cargo build --release
 [build]
 target = "x86_64-unknown-linux-musl"
+
+# Windows (MSVC): link the C runtime statically so the binary does not need the
+# Visual C++ Redistributable (vcruntime140.dll); only system DLLs remain.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

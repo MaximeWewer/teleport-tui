@@ -148,6 +148,18 @@ jobs:
       - name: Build (release)
         run: cargo build --release --bin teleport-tui --target ${{ matrix.target }}
 
+      # The static CRT (.cargo/config.toml) must leave no import of the Visual
+      # C++ runtime, else the binary needs the VC++ Redistributable to start.
+      - name: Check static CRT
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          EXE="target/${{ matrix.target }}/release/teleport-tui.exe"
+          if grep -aiqE 'vcruntime[0-9]*\.dll|msvcp[0-9]*\.dll' "${EXE}"; then
+            echo "::error::${EXE} still imports the VC++ runtime"
+            exit 1
+          fi
+
       # Archive the binary: .zip on Windows, .tar.gz elsewhere.
       - name: Package
         id: package
