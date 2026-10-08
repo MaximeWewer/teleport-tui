@@ -15,7 +15,7 @@ use crate::recording::SessionRecording;
 use crate::request::AccessRequest;
 use crate::resource::{App, Database, KubeCluster};
 use crate::session::ActiveSession;
-use crate::value::{ClusterName, ResourceName, RoleList, TokenTypes};
+use crate::value::{ClusterName, ProxyAddr, ResourceName, RoleList, TokenTypes};
 
 /// Severity of an exported error record.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,6 +254,23 @@ pub trait AuthGateway: std::fmt::Debug + Send + Sync {
     /// `cluster`, or another [`DomainError`] on spawn failure. Defaults to
     /// "unsupported" so gateways without profile control need not implement it.
     fn select_cluster(&self, _cluster: &ClusterName) -> Result<(), DomainError> {
+        Err(DomainError::BinaryNotFound)
+    }
+
+    /// Make the profile of another proxy the active one (`tsh login
+    /// --proxy=<proxy>`), so every later `tsh`/`tctl` call targets that Teleport
+    /// cluster. `tsh` has no "profile switch": a login with a still-valid cached
+    /// certificate is what switches, silently.
+    ///
+    /// Non-interactive: an `Err(NotAuthenticated)` means that profile needs a
+    /// fresh interactive login (the UI hands the terminal to `tsh` for that).
+    ///
+    /// # Errors
+    /// Returns [`DomainError::NotAuthenticated`] when the profile's session is
+    /// gone or expired, or another [`DomainError`] on spawn / network failure.
+    /// Defaults to "unsupported" so gateways without profile control need not
+    /// implement it.
+    fn switch_profile(&self, _proxy: &ProxyAddr) -> Result<(), DomainError> {
         Err(DomainError::BinaryNotFound)
     }
 }

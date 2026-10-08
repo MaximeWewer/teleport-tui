@@ -23,8 +23,8 @@
 
 use domain::auth::{AuthMethod, MfaMode};
 use domain::value::{
-    ClusterName, DeviceName, Hostname, Identifier, Login, RequestId, ResourceName, RoleList,
-    SessionId,
+    ClusterName, DeviceName, Hostname, Identifier, Login, ProxyAddr, RequestId, ResourceName,
+    RoleList, SessionId,
 };
 
 /// `tsh login [--proxy=…] [--user=…] [--auth=…] [--mfa-mode=…]`. An absent
@@ -51,6 +51,16 @@ pub fn login(
         args.push(format!("--mfa-mode={mfa}"));
     }
     args
+}
+
+/// `tsh login --proxy=<proxy>`: switch to (or log in again to) another profile.
+///
+/// Handed the terminal when that profile's certificate has expired, so `tsh`
+/// drives the password / MFA / SSO flow itself; it reuses the user stored in
+/// that proxy's profile.
+#[must_use]
+pub fn login_proxy(proxy: &ProxyAddr) -> Vec<String> {
+    vec!["login".to_owned(), format!("--proxy={proxy}")]
 }
 
 /// `tsh logout`.
@@ -434,6 +444,15 @@ mod tests {
                 Some(MfaMode::CrossPlatform)
             ),
             vec!["login", "--auth=okta", "--mfa-mode=cross-platform"]
+        );
+    }
+
+    #[test]
+    fn login_proxy_shape() {
+        let proxy = ProxyAddr::try_from("teleport.example.org:443").unwrap();
+        assert_eq!(
+            login_proxy(&proxy),
+            ["login", "--proxy=teleport.example.org:443"]
         );
     }
 

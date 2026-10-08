@@ -79,7 +79,23 @@ impl<R: CommandRunner> AuthGateway for TshAuthGateway<R> {
         // is instant and silent. Failures go through the shared classifier, so a
         // network error or an expired cert stays distinguishable (with its
         // redacted stderr) from a plain "login required".
-        match self.cli.run(vec!["login".to_owned(), cluster.to_string()]) {
+        self.login_silently(vec!["login".to_owned(), cluster.to_string()])
+    }
+
+    fn switch_profile(&self, proxy: &ProxyAddr) -> Result<(), DomainError> {
+        // `--proxy=<host:port>` of another profile: with that profile's cert
+        // still valid, tsh just makes it the current profile (~1s, no prompt).
+        // The `--flag=value` form keeps the address a single value.
+        self.login_silently(vec!["login".to_owned(), format!("--proxy={proxy}")])
+    }
+}
+
+impl<R: CommandRunner> TshAuthGateway<R> {
+    /// Run a `tsh login` that must not prompt (stdin is detached). A login that
+    /// wanted to prompt (password / MFA / SSO) reads as "login required", so
+    /// the UI can fall back to an interactive login.
+    fn login_silently(&self, argv: Vec<String>) -> Result<(), DomainError> {
+        match self.cli.run(argv) {
             Ok(_) => Ok(()),
             // Without a cached session tsh tries to prompt for credentials, which
             // fails here (stdin is not a tty): that is "login required" too.
@@ -266,6 +282,52 @@ mod tests {
             DomainError::Backend { detail, .. } => assert!(detail.contains("connection refused")),
             other => panic!("expected Backend, got {other:?}"),
         }
+    }
+
+    /// Runner that records the argv and fails it with `stderr` (or succeeds
+    /// when `stderr` is empty).
+    #[derive(Debug, Default)]
+    struct ArgvRunner {
+        argv: std::sync::Mutex<Vec<String>>,
+        stderr: &'static str,
+    }
+    impl CommandRunner for ArgvRunner {
+        fn run(&self, req: &CommandRequest) -> std::io::Result<CommandOutcome> {
+            self.argv.lock().unwrap().clone_from(&req.args);
+            Ok(CommandOutcome {
+                status: Some(i32::from(!self.stderr.is_empty())),
+                stdout: String::new(),
+                stderr: self.stderr.to_owned(),
+            })
+        }
+    }
+
+    #[test]
+    fn switch_profile_logs_in_to_the_proxy_without_prompting() {
+        let proxy = ProxyAddr::try_from("teleport.example.org:443").unwrap();
+        let gw = TshAuthGateway::new(ArgvRunner::default(), "tsh".into());
+        gw.switch_profile(&proxy).unwrap();
+        assert_eq!(
+            *gw.cli.runner.argv.lock().unwrap(),
+            ["login", "--proxy=teleport.example.org:443"]
+        );
+        // An expired profile: tsh wanted to prompt and had no terminal.
+        let expired = ArgvRunner {
+            stderr: "ERROR: underlying reader is not a terminal",
+            ..ArgvRunner::default()
+        };
+        let err = TshAuthGateway::new(expired, "tsh".into())
+            .switch_profile(&proxy)
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotAuthenticated));
+        let down = ArgvRunner {
+            stderr: "ERROR: dial tcp: connection refused",
+            ..ArgvRunner::default()
+        };
+        let err = TshAuthGateway::new(down, "tsh".into())
+            .switch_profile(&proxy)
+            .unwrap_err();
+        assert!(matches!(err, DomainError::Backend { .. }));
     }
 
     #[test]

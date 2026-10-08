@@ -16,12 +16,12 @@ use domain::port::{
     AdminRepository, AppRepository, AuthGateway, ClusterRepository, DatabaseRepository,
     KubeRepository, NodeRepository, RecordingRepository, RequestRepository, SessionRepository,
 };
-use domain::profile::Profile;
+use domain::profile::{Profile, SessionStatus};
 use domain::recording::SessionRecording;
 use domain::request::AccessRequest;
 use domain::resource::{App, Database, KubeCluster};
 use domain::session::ActiveSession;
-use domain::value::{ClusterName, ResourceName, RoleList, TokenTypes};
+use domain::value::{ClusterName, ProxyAddr, ResourceName, RoleList, TokenTypes};
 
 /// List the root/leaf topology.
 #[derive(Debug)]
@@ -316,6 +316,47 @@ impl<'a> GetStatus<'a> {
     /// Propagates gateway failures.
     pub fn execute(&self) -> Result<Option<Profile>, DomainError> {
         self.gateway.status()
+    }
+}
+
+/// Read the active profile plus every other known `tsh` profile (one status
+/// read).
+#[derive(Debug)]
+pub struct ListProfiles<'a> {
+    gateway: &'a dyn AuthGateway,
+}
+
+impl<'a> ListProfiles<'a> {
+    #[must_use]
+    pub fn new(gateway: &'a dyn AuthGateway) -> Self {
+        Self { gateway }
+    }
+
+    /// # Errors
+    /// Propagates gateway failures.
+    pub fn execute(&self) -> Result<SessionStatus, DomainError> {
+        self.gateway.list_profiles()
+    }
+}
+
+/// Make another proxy's profile the active one (non-interactive, needs that
+/// profile's certificate to still be valid).
+#[derive(Debug)]
+pub struct SwitchProfile<'a> {
+    gateway: &'a dyn AuthGateway,
+}
+
+impl<'a> SwitchProfile<'a> {
+    #[must_use]
+    pub fn new(gateway: &'a dyn AuthGateway) -> Self {
+        Self { gateway }
+    }
+
+    /// # Errors
+    /// Propagates gateway failures (`NotAuthenticated` = an interactive login
+    /// is needed) as [`DomainError`].
+    pub fn execute(&self, proxy: &ProxyAddr) -> Result<(), DomainError> {
+        self.gateway.switch_profile(proxy)
     }
 }
 
@@ -804,6 +845,44 @@ mod tests {
             self.selected.lock().unwrap().push(cluster.to_string());
             Ok(())
         }
+        fn switch_profile(&self, proxy: &ProxyAddr) -> Result<(), DomainError> {
+            if proxy.as_str().starts_with("expired") {
+                return Err(DomainError::NotAuthenticated);
+            }
+            self.selected.lock().unwrap().push(proxy.to_string());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn list_profiles_defaults_to_the_active_one_alone() {
+        let gw = Gateway {
+            logged_in: true,
+            ..Gateway::default()
+        };
+        let status = ListProfiles::new(&gw).execute().unwrap();
+        assert_eq!(status.active.unwrap().username, "alice");
+        assert!(status.profiles.is_empty());
+    }
+
+    #[test]
+    fn switch_profile_forwards_the_proxy_and_its_auth_error() {
+        let gw = Gateway::default();
+        let proxy = |s: &str| ProxyAddr::try_from(s).unwrap();
+        SwitchProfile::new(&gw)
+            .execute(&proxy("b.example.com:443"))
+            .unwrap();
+        assert_eq!(*gw.selected.lock().unwrap(), ["b.example.com:443"]);
+        let err = SwitchProfile::new(&gw)
+            .execute(&proxy("expired.example.com:443"))
+            .unwrap_err();
+        assert!(matches!(err, DomainError::NotAuthenticated));
+        assert!(matches!(
+            SwitchProfile::new(&StatusOnly)
+                .execute(&proxy("b.example.com:443"))
+                .unwrap_err(),
+            DomainError::BinaryNotFound
+        ));
     }
 
     #[test]
