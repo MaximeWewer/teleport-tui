@@ -31,6 +31,11 @@ that into: open, arrow to the thing, press `Enter`.
   or `apps login`. Several logins available? It offers a picker. No flags to memorise.
 - **All your clusters at once** - a switcher (`c`) jumps between root/leaf, or pick
   **All clusters** to see any tab aggregated across every online cluster in one view.
+- **Several Teleport proxies, no logout** - the same switcher lists your other `tsh`
+  profiles (one per proxy you logged in to) with their user and cert validity. A valid
+  one switches in the background (`tsh login --proxy=…`, no prompt) and every tab reloads
+  for it; an expired one hands you the interactive `tsh login --proxy=…` (password, MFA
+  or SSO) first. Proxies and forwards already running keep their own certificates.
 - **Port-forwards that don't block you** - the SSH options popup (`o`) builds a `-L`
   tunnel; a `-N` tunnel runs **in the background** and lands in a forwards list you manage
   with `F` (stop any of them anytime). Or fire a one-off command on a node and read its
@@ -139,7 +144,7 @@ Actions are context-sensitive (tab + selection) and gated by capabilities/rights
 | `↑/↓` `j/k`, mouse wheel | move selection |
 | `/` | incremental search |
 | `Enter` | open (SSH/kube/db/app/request), admin row → detail popup, recording → replay |
-| `c` | switch cluster (root/leaf) or **All clusters** aggregate |
+| `c` | switch cluster (root/leaf), **All clusters** aggregate, or another Teleport profile (proxy) |
 | `r` | refresh current tab |
 | `o` | SSH: options - `-L` forward, `-N` background tunnel, or a one-off command |
 | `F` | list / stop active background SSH forwards |
