@@ -10,7 +10,7 @@ use crate::error::{DomainError, ReportableError};
 use crate::mfa::MfaDevice;
 use crate::node::SshNode;
 use crate::preferences::Preferences;
-use crate::profile::Profile;
+use crate::profile::{Profile, SessionStatus};
 use crate::recording::SessionRecording;
 use crate::request::AccessRequest;
 use crate::resource::{App, Database, KubeCluster};
@@ -216,6 +216,19 @@ pub trait AuthGateway: std::fmt::Debug + Send + Sync {
     /// # Errors
     /// Returns [`DomainError`] on parse failure or unexpected CLI error.
     fn status(&self) -> Result<Option<Profile>, DomainError>;
+
+    /// The active profile plus every profile `tsh` knows (one per proxy logged
+    /// in to), from the same single `tsh status` read. Defaults to [`Self::status`]
+    /// with no other profiles, for gateways that only know the active one.
+    ///
+    /// # Errors
+    /// Returns [`DomainError`] on parse failure or unexpected CLI error.
+    fn list_profiles(&self) -> Result<SessionStatus, DomainError> {
+        Ok(SessionStatus {
+            active: self.status()?,
+            profiles: Vec::new(),
+        })
+    }
 
     /// List the current user's registered MFA devices (`tsh mfa ls`).
     ///

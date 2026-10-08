@@ -9,21 +9,27 @@
 use domain::error::DomainError;
 use domain::mfa::MfaDevice;
 use domain::port::AuthGateway;
-use domain::profile::Profile;
-use domain::value::ClusterName;
+use domain::profile::{Profile, ProfileSummary, SessionStatus};
+use domain::value::{ClusterName, ProxyAddr};
 use nanoserde::DeJson;
 
-use super::{args, parse_json};
+use super::{args, epoch_secs, parse_json};
 use crate::process::CommandRunner;
 
 #[derive(Debug, DeJson)]
 struct StatusDto {
     #[nserde(default)]
     active: Option<ActiveDto>,
+    /// Every *other* profile (tsh lists the active one only under `active`).
+    #[nserde(default)]
+    profiles: Vec<ActiveDto>,
 }
 
+/// One profile entry; `tsh` uses the same shape for `active` and `profiles`.
 #[derive(Debug, DeJson)]
 struct ActiveDto {
+    #[nserde(default)]
+    profile_url: String,
     #[nserde(default)]
     username: String,
     #[nserde(default)]
@@ -44,10 +50,14 @@ tsh_adapter!(TshAuthGateway);
 
 impl<R: CommandRunner> AuthGateway for TshAuthGateway<R> {
     fn status(&self) -> Result<Option<Profile>, DomainError> {
+        self.list_profiles().map(|s| s.active)
+    }
+
+    fn list_profiles(&self) -> Result<SessionStatus, DomainError> {
         match self.cli.run(args(&["status", "--format=json"])) {
             Ok(stdout) => parse_status_json(&stdout),
             // Logged out is a normal state, not an error.
-            Err(DomainError::NotAuthenticated) => Ok(None),
+            Err(DomainError::NotAuthenticated) => Ok(SessionStatus::default()),
             Err(other) => Err(other),
         }
     }
@@ -158,17 +168,46 @@ fn parse_mfa_devices(stdout: &str) -> Result<Vec<MfaDevice>, DomainError> {
         .collect())
 }
 
-fn parse_status_json(stdout: &str) -> Result<Option<Profile>, DomainError> {
+fn parse_status_json(stdout: &str) -> Result<SessionStatus, DomainError> {
     let dto: StatusDto = parse_json(stdout)?;
-    Ok(dto.active.map(|a| Profile {
-        username: a.username,
-        cluster: a.cluster,
-        roles: a.roles,
-        logins: a.logins,
-        kubernetes_enabled: a.kubernetes_enabled,
-        kubernetes_users: a.kubernetes_users,
-        valid_until: a.valid_until,
-    }))
+    let mut profiles: Vec<ProfileSummary> =
+        dto.active.iter().filter_map(|a| summary(a, true)).collect();
+    profiles.extend(dto.profiles.iter().filter_map(|p| summary(p, false)));
+    Ok(SessionStatus {
+        active: dto.active.map(|a| Profile {
+            username: a.username,
+            cluster: a.cluster,
+            roles: a.roles,
+            logins: a.logins,
+            kubernetes_enabled: a.kubernetes_enabled,
+            kubernetes_users: a.kubernetes_users,
+            valid_until: a.valid_until,
+        }),
+        profiles,
+    })
+}
+
+/// A profile entry as a [`ProfileSummary`]; `None` when its `profile_url` does
+/// not yield a usable proxy address (it could not be switched to anyway).
+fn summary(dto: &ActiveDto, active: bool) -> Option<ProfileSummary> {
+    Some(ProfileSummary {
+        proxy: proxy_of(&dto.profile_url)?,
+        cluster: dto.cluster.clone(),
+        username: dto.username.clone(),
+        valid_until: dto.valid_until.clone(),
+        expires_at: epoch_secs(&dto.valid_until),
+        active,
+    })
+}
+
+/// The `host:port` proxy address of a profile URL
+/// (`https://proxy.example.com:443` -> `proxy.example.com:443`).
+fn proxy_of(profile_url: &str) -> Option<ProxyAddr> {
+    let rest = profile_url
+        .split_once("://")
+        .map_or(profile_url, |(_, rest)| rest);
+    let host_port = rest.split('/').next()?;
+    ProxyAddr::try_from(host_port).ok()
 }
 
 #[cfg(test)]
@@ -250,6 +289,7 @@ mod tests {
     fn parses_status_active_profile() {
         let p = parse_status_json(include_str!("../../tests/fixtures/status.json"))
             .unwrap()
+            .active
             .expect("active profile");
         assert_eq!(p.username, "maxime.wewer");
         assert_eq!(p.cluster, "root.example.com");
@@ -258,8 +298,55 @@ mod tests {
     }
     #[test]
     fn parses_status_logged_out() {
-        let p =
+        let s =
             parse_status_json(include_str!("../../tests/fixtures/status_loggedout.json")).unwrap();
-        assert!(p.is_none());
+        assert!(s.active.is_none());
+        assert!(s.profiles.is_empty());
+    }
+
+    #[test]
+    fn parses_every_profile_from_one_status() {
+        let s =
+            parse_status_json(include_str!("../../tests/fixtures/status_profiles.json")).unwrap();
+        // The active profile keeps its full detail (selected cluster: a leaf).
+        let active = s.active.as_ref().expect("active profile");
+        assert_eq!(active.cluster, "leaf.example.com");
+        assert_eq!(active.logins, ["root", "admin"]);
+        let proxies: Vec<_> = s.profiles.iter().map(|p| p.proxy.as_str()).collect();
+        assert_eq!(
+            proxies,
+            [
+                "root.example.com:443",
+                "teleport.example.org:443",
+                "other.example.net:3080"
+            ]
+        );
+        assert!(s.profiles[0].active);
+        let others: Vec<_> = s.others().map(|p| p.username.as_str()).collect();
+        assert_eq!(others, ["alice", "alice@example.net"]);
+        // Expiry is read with its UTC offset: 2000-10-05T21:15:47+02:00.
+        let expired = &s.profiles[2];
+        assert_eq!(expired.expires_at, Some(970_773_347));
+        assert!(expired.is_expired_at(970_773_347));
+        assert!(!s.profiles[1].is_expired_at(970_773_347));
+    }
+
+    #[test]
+    fn proxy_of_strips_scheme_and_path_and_rejects_junk() {
+        let p = |u: &str| proxy_of(u).map(|a| a.to_string());
+        assert_eq!(
+            p("https://proxy.example.com:443").as_deref(),
+            Some("proxy.example.com:443")
+        );
+        assert_eq!(
+            p("https://proxy.example.com:443/").as_deref(),
+            Some("proxy.example.com:443")
+        );
+        assert_eq!(
+            p("proxy.example.com:3080").as_deref(),
+            Some("proxy.example.com:3080")
+        );
+        assert_eq!(p(""), None);
+        assert_eq!(p("https://-evil:443"), None);
     }
 }

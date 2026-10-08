@@ -60,6 +60,41 @@ pub(crate) fn run_cli(
     }
 }
 
+/// Seconds since the Unix epoch for an RFC 3339 timestamp
+/// (`YYYY-MM-DDThh:mm:ss[.frac](Z|±hh:mm)`). Fractional seconds are ignored; a
+/// missing or unreadable zone suffix reads as UTC. `None` on a malformed date.
+/// Uses Howard Hinnant's `days_from_civil` so no date-library dependency is
+/// pulled into this minimal-deps crate.
+pub(crate) fn epoch_secs(s: &str) -> Option<i64> {
+    let field = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
+    let (year, month, day) = (field(0, 4)?, field(5, 7)?, field(8, 10)?);
+    let (hour, min, sec) = (field(11, 13)?, field(14, 16)?, field(17, 19)?);
+    // days_from_civil (Howard Hinnant): civil date -> days since 1970-01-01.
+    let years = year - i64::from(month <= 2);
+    let era = (if years >= 0 { years } else { years - 399 }) / 400;
+    let year_of_era = years - era * 400;
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(days * 86_400 + hour * 3600 + min * 60 + sec - utc_offset_secs(s.get(19..)?))
+}
+
+/// The UTC offset of an RFC 3339 zone tail (after the seconds, fraction
+/// allowed): `+02:00` is 7200, `Z` or anything unreadable is 0.
+fn utc_offset_secs(tail: &str) -> i64 {
+    let zone = tail.trim_start_matches(|c: char| c == '.' || c.is_ascii_digit());
+    let sign = match zone.get(..1) {
+        Some("+") => 1,
+        Some("-") => -1,
+        _ => return 0,
+    };
+    let part = |a: usize, z: usize| zone.get(a..z).and_then(|v| v.parse::<i64>().ok());
+    match (part(1, 3), part(4, 6)) {
+        (Some(h), Some(m)) => sign * (h * 3600 + m * 60),
+        _ => 0,
+    }
+}
+
 /// Owned argv from string literals: `args(&["mfa", "ls"])`.
 pub(crate) fn args(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| (*s).to_owned()).collect()
@@ -174,6 +209,18 @@ mod tests {
     use super::*;
     use domain::cluster::{ClusterKind, ClusterStatus};
     use domain::value::ClusterName;
+    #[test]
+    fn epoch_secs_honours_the_utc_offset() {
+        assert_eq!(epoch_secs("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(epoch_secs("1970-01-01T02:00:00+02:00"), Some(0));
+        assert_eq!(epoch_secs("1969-12-31T22:30:00-01:30"), Some(0));
+        assert_eq!(
+            epoch_secs("2026-06-29T16:30:26.000000000Z"),
+            Some(1_782_750_626)
+        );
+        assert_eq!(epoch_secs("not a date"), None);
+    }
+
     #[test]
     fn classifies_not_logged_in() {
         assert!(matches!(

@@ -1,0 +1,43 @@
+{
+  "active": {
+    "profile_url": "https://root.example.com:443",
+    "username": "alice",
+    "cluster": "leaf.example.com",
+    "roles": ["access", "editor"],
+    "traits": {"logins": ["root"]},
+    "logins": ["root", "admin"],
+    "kubernetes_enabled": true,
+    "kubernetes_users": ["kube-admin"],
+    "kubernetes_groups": ["system:masters"],
+    "valid_until": "2099-10-08T22:07:40+02:00",
+    "extensions": ["permit-agent-forwarding", "permit-port-forwarding", "permit-pty"]
+  },
+  "profiles": [
+    {
+      "profile_url": "https://teleport.example.org:443",
+      "username": "alice",
+      "cluster": "teleport.example.org",
+      "roles": ["access"],
+      "traits": {},
+      "logins": ["root"],
+      "kubernetes_enabled": false,
+      "kubernetes_users": [],
+      "kubernetes_groups": [],
+      "valid_until": "2099-10-08T22:05:58+02:00",
+      "extensions": ["permit-pty"]
+    },
+    {
+      "profile_url": "https://other.example.net:3080",
+      "username": "alice@example.net",
+      "cluster": "other.example.net",
+      "roles": ["access"],
+      "traits": {},
+      "logins": ["ubuntu"],
+      "kubernetes_enabled": false,
+      "kubernetes_users": [],
+      "kubernetes_groups": [],
+      "valid_until": "2000-10-05T21:15:47+02:00",
+      "extensions": []
+    }
+  ]
+}

@@ -11,7 +11,7 @@ use domain::port::RecordingRepository;
 use domain::recording::SessionRecording;
 use nanoserde::DeJson;
 
-use super::parse_json;
+use super::{epoch_secs, parse_json};
 use crate::process::CommandRunner;
 
 tsh_adapter!(TshRecordingRepository);
@@ -70,25 +70,6 @@ fn parse_recordings(stdout: &str) -> Result<Vec<SessionRecording>, DomainError> 
             }
         })
         .collect())
-}
-
-/// Seconds-since-epoch for an RFC 3339 UTC timestamp (`YYYY-MM-DDThh:mm:ss…Z`),
-/// using only the leading `…ss` - fractional seconds and the zone suffix are
-/// ignored (Teleport always emits `Z`). Returns `None` on a malformed prefix.
-/// Uses Howard Hinnant's `days_from_civil` so no date-library dependency is
-/// pulled into this minimal-deps crate.
-fn epoch_secs(s: &str) -> Option<i64> {
-    let field = |a: usize, z: usize| s.get(a..z)?.parse::<i64>().ok();
-    let (year, month, day) = (field(0, 4)?, field(5, 7)?, field(8, 10)?);
-    let (hour, min, sec) = (field(11, 13)?, field(14, 16)?, field(17, 19)?);
-    // days_from_civil (Howard Hinnant): civil date → days since 1970-01-01.
-    let years = year - i64::from(month <= 2);
-    let era = (if years >= 0 { years } else { years - 399 }) / 400;
-    let year_of_era = years - era * 400;
-    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    Some(days * 86_400 + hour * 3600 + min * 60 + sec)
 }
 
 /// Compact human duration: `45s`, `5m29s`, `2h04m`.

@@ -125,6 +125,14 @@ string_newtype!(SessionId, "session_id", 64, |s: &str| {
 // `:`, `@`, `/`), so it is only ever passed as `--flag=value` or after `--`.
 string_newtype!(Identifier, "identifier", 256, |_: &str| true);
 
+// A Teleport proxy address (`host:port`, or `[v6]:port`) as `tsh login
+// --proxy=` takes it; it identifies a `tsh` profile. Always passed in the
+// `--proxy=value` form, and `is_safe_ident` already rejects a leading `-`.
+string_newtype!(ProxyAddr, "proxy_addr", 260, |s: &str| {
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+});
+
 // Name of a registered MFA device (`tsh mfa rm <name>`). Chosen by the user at
 // registration, so spaces are allowed; control chars and a leading `-` are not.
 string_newtype!(DeviceName, "mfa_device", 256, is_safe_label, |_: &str| true);
@@ -212,6 +220,21 @@ mod tests {
         assert!(DeviceName::try_from("my yubikey").is_ok());
         assert!(DeviceName::try_from("-rf").is_err());
         assert!(DeviceName::try_from("bad\nname").is_err());
+    }
+
+    #[test]
+    fn proxy_addr_accepts_host_port_only() {
+        assert!(ProxyAddr::try_from("proxy.example.com:443").is_ok());
+        assert!(ProxyAddr::try_from("[::1]:3080").is_ok());
+        for bad in [
+            "--proxy=evil",
+            "a b:443",
+            "https://x.example.com",
+            "x;y:1",
+            "",
+        ] {
+            assert!(ProxyAddr::try_from(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]
