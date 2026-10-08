@@ -267,21 +267,22 @@ impl App {
         self.input.clear();
     }
 
-    /// `c`: open the cluster picker on the current selection.
+    /// `c`: open the cluster / profile picker on the current selection.
     fn open_cluster_picker(&mut self) {
-        // The picker lists the topology; without it (clusters not loaded
-        // yet, or `tsh clusters` failed - e.g. an expired session) there's
-        // nothing to show, so give feedback instead of entering an empty,
-        // invisible Picker mode.
-        let Some(topo) = self.topology.as_ref() else {
+        // Without a topology (clusters not loaded yet, or `tsh clusters` failed
+        // - e.g. an expired session) only the other profiles can be listed; with
+        // none of those either there's nothing to show, so give feedback instead
+        // of entering an empty, invisible Picker mode.
+        if self.picker_entries().is_empty() {
             self.status = Some("clusters not loaded - press L to log in, or r to retry".to_owned());
             return;
-        };
-        // Index 0 = "All clusters"; real clusters are offset by 1.
-        let sel = if self.agg.enabled {
-            0
-        } else {
-            topo.all().position(|c| c == topo.selected()).unwrap_or(0) + 1
+        }
+        // Index 0 = "All clusters"; real clusters are offset by 1. With no
+        // topology the list starts at the other profiles.
+        let sel = match &self.topology {
+            Some(_) if self.agg.enabled => 0,
+            Some(topo) => topo.all().position(|c| c == topo.selected()).unwrap_or(0) + 1,
+            None => 0,
         };
         self.mode = Mode::Picker;
         self.picker.select(Some(sel));
@@ -320,7 +321,7 @@ impl App {
             KeyCode::Esc | KeyCode::Char('c') => self.mode = Mode::Normal,
             KeyCode::Char('j') | KeyCode::Down => self.move_picker(true),
             KeyCode::Char('k') | KeyCode::Up => self.move_picker(false),
-            KeyCode::Enter => self.confirm_picker(),
+            KeyCode::Enter => return self.confirm_picker(),
             _ => {}
         }
         Outcome::Continue

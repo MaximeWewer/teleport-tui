@@ -1962,7 +1962,10 @@ fn logout_clears_all_resources() {
     assert!(!app.lists.nodes.is_empty());
     assert!(app.topology.is_some());
     // Post-logout status refresh reports no active session → wipe everything.
-    app.apply(0, JobResult::Status(Ok(None)));
+    app.apply(
+        0,
+        JobResult::Status(Ok(domain::profile::SessionStatus::default())),
+    );
     assert!(app.lists.nodes.is_empty());
     assert!(app.topology.is_none());
     assert!(!app.admin_allowed);
@@ -2217,4 +2220,362 @@ fn superseded_pool_jobs_are_stale() {
     assert!(!generations.is_stale(Lane::Prefetch, PREFETCH_BASE + 2));
     assert!(generations.is_stale(Lane::Prefetch, PREFETCH_BASE + 1));
     assert!(!generations.is_stale(Lane::Other, 0));
+}
+
+// ---- Switching between tsh profiles (other proxies) ----
+
+/// Auth with several `tsh` profiles: the active one follows `switch_profile`.
+/// `stale.example:443` is expired; `late.example:443` looks valid but its
+/// silent switch wants a prompt; `down.example:443` fails on the network.
+#[derive(Debug)]
+struct ProfilesAuth {
+    current: std::sync::Mutex<String>,
+    switches: std::sync::Mutex<Vec<String>>,
+}
+
+impl ProfilesAuth {
+    fn new() -> Self {
+        Self {
+            current: std::sync::Mutex::new("root.example:443".to_owned()),
+            switches: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// `(proxy, user, valid_until, expires_at)` of every known profile.
+    const PROFILES: [(&str, &str, &str, i64); 5] = [
+        (
+            "root.example:443",
+            "maxime",
+            "2099-01-01T10:00:00Z",
+            4_070_944_800,
+        ),
+        (
+            "other.example:443",
+            "bob",
+            "2099-01-01T10:00:00Z",
+            4_070_944_800,
+        ),
+        (
+            "stale.example:443",
+            "carol",
+            "2000-01-01T10:00:00Z",
+            946_720_800,
+        ),
+        (
+            "late.example:443",
+            "dave",
+            "2099-01-01T10:00:00Z",
+            4_070_944_800,
+        ),
+        (
+            "down.example:443",
+            "erin",
+            "2099-01-01T10:00:00Z",
+            4_070_944_800,
+        ),
+    ];
+}
+
+impl AuthGateway for ProfilesAuth {
+    fn status(&self) -> Result<Option<Profile>, DomainError> {
+        self.list_profiles().map(|s| s.active)
+    }
+    fn list_profiles(&self) -> Result<domain::profile::SessionStatus, DomainError> {
+        let current = self.current.lock().unwrap().clone();
+        let profiles = Self::PROFILES
+            .iter()
+            .map(|(proxy, user, until, at)| domain::profile::ProfileSummary {
+                proxy: domain::value::ProxyAddr::try_from(*proxy).unwrap(),
+                cluster: proxy.trim_end_matches(":443").to_owned(),
+                username: (*user).to_owned(),
+                valid_until: (*until).to_owned(),
+                expires_at: Some(*at),
+                active: *proxy == current,
+            })
+            .collect::<Vec<_>>();
+        let active = profiles.iter().find(|p| p.active).map(|p| Profile {
+            username: p.username.clone(),
+            cluster: "root.example".to_owned(),
+            roles: vec!["admin".to_owned()],
+            logins: vec!["root".to_owned()],
+            kubernetes_enabled: false,
+            kubernetes_users: Vec::new(),
+            valid_until: p.valid_until.clone(),
+        });
+        Ok(domain::profile::SessionStatus { active, profiles })
+    }
+    fn select_cluster(&self, _cluster: &ClusterName) -> Result<(), DomainError> {
+        Ok(())
+    }
+    fn switch_profile(&self, proxy: &domain::value::ProxyAddr) -> Result<(), DomainError> {
+        self.switches.lock().unwrap().push(proxy.to_string());
+        match proxy.as_str() {
+            "stale.example:443" | "late.example:443" => Err(DomainError::NotAuthenticated),
+            "down.example:443" => Err(DomainError::Backend {
+                code: "TSH_EXEC_FAILED",
+                detail: "connection refused".to_owned(),
+            }),
+            other => {
+                other.clone_into(&mut self.current.lock().unwrap());
+                Ok(())
+            }
+        }
+    }
+}
+
+/// A test app on [`ProfilesAuth`], plus a handle to the fake to inspect it.
+fn profiles_app() -> (App, std::sync::Arc<ProfilesAuth>) {
+    #[derive(Debug)]
+    struct Shared(std::sync::Arc<ProfilesAuth>);
+    impl AuthGateway for Shared {
+        fn status(&self) -> Result<Option<Profile>, DomainError> {
+            self.0.status()
+        }
+        fn list_profiles(&self) -> Result<domain::profile::SessionStatus, DomainError> {
+            self.0.list_profiles()
+        }
+        fn select_cluster(&self, c: &ClusterName) -> Result<(), DomainError> {
+            self.0.select_cluster(c)
+        }
+        fn switch_profile(&self, p: &domain::value::ProxyAddr) -> Result<(), DomainError> {
+            self.0.switch_profile(p)
+        }
+    }
+    let auth = std::sync::Arc::new(ProfilesAuth::new());
+    let app = test_app_with(
+        Box::new(FakeAdmin),
+        Box::new(Shared(std::sync::Arc::clone(&auth))),
+    );
+    (app, auth)
+}
+
+/// Open the picker and highlight the other profile whose proxy is `proxy`.
+fn pick_profile(app: &mut App, proxy: &str) -> Outcome {
+    app.on_key(press('c'));
+    assert_eq!(app.mode, Mode::Picker);
+    let idx = app
+        .picker_entries()
+        .iter()
+        .position(|e| matches!(e, PickerEntry::Profile(p) if p.proxy.as_str() == proxy))
+        .expect("profile listed in the picker");
+    app.picker.select(Some(idx));
+    app.on_key(KeyEvent::from(KeyCode::Enter))
+}
+
+fn picker_profiles(app: &App) -> Vec<String> {
+    app.picker_entries()
+        .iter()
+        .filter_map(|e| match e {
+            PickerEntry::Profile(p) => Some(p.proxy.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn picker_lists_the_other_profiles_after_the_clusters() {
+    let (mut app, _) = profiles_app();
+    app.on_key(press('c'));
+    let entries = app.picker_entries();
+    // Unchanged head: All clusters, root, leaf of the active profile.
+    assert_eq!(entries[0], PickerEntry::AllClusters);
+    assert!(matches!(entries[1], PickerEntry::Cluster(c) if c.name.as_str() == "root.example"));
+    assert!(matches!(entries[2], PickerEntry::Cluster(c) if c.name.as_str() == "leaf.example"));
+    // Then every *other* profile (the active root.example:443 is not offered).
+    assert_eq!(
+        picker_profiles(&app),
+        [
+            "other.example:443",
+            "stale.example:443",
+            "late.example:443",
+            "down.example:443"
+        ]
+    );
+    let count = entries.len();
+    // The selection walks into the profiles section and stops at its end.
+    for _ in 0..20 {
+        app.on_key(press('j'));
+    }
+    assert_eq!(app.picker.selected(), Some(count - 1));
+}
+
+#[test]
+fn picker_offers_other_profiles_even_without_a_topology() {
+    let (mut app, _) = profiles_app();
+    app.topology = None; // e.g. the active profile's `tsh clusters` failed
+    app.on_key(press('c'));
+    assert_eq!(app.mode, Mode::Picker);
+    assert!(matches!(app.picker_entries()[0], PickerEntry::Profile(_)));
+    assert_eq!(app.picker.selected(), Some(0));
+}
+
+#[test]
+fn selecting_a_valid_profile_switches_in_the_background_and_reloads() {
+    let (mut app, auth) = profiles_app();
+    assert_eq!(app.profile.as_ref().unwrap().username, "maxime");
+    let outcome = pick_profile(&mut app, "other.example:443");
+    // No terminal handoff: the switch ran as a background job.
+    assert_eq!(outcome, Outcome::Continue);
+    assert_eq!(*auth.switches.lock().unwrap(), ["other.example:443"]);
+    assert_eq!(app.profile_switching, None);
+    assert_eq!(app.profile_gen, 1);
+    // Everything profile-dependent was re-read from the new profile.
+    assert_eq!(app.profile.as_ref().unwrap().username, "bob");
+    assert!(app.topology.is_some());
+    assert_eq!(app.lists.nodes.len(), 3);
+    assert!(app.admin_probed);
+    assert!(picker_profiles(&app).contains(&"root.example:443".to_owned()));
+    assert!(!picker_profiles(&app).contains(&"other.example:443".to_owned()));
+    assert!(
+        app.status
+            .as_deref()
+            .unwrap_or("")
+            .contains("other.example:443")
+    );
+}
+
+#[test]
+fn selecting_an_expired_profile_hands_off_an_interactive_login() {
+    let (mut app, auth) = profiles_app();
+    match pick_profile(&mut app, "stale.example:443") {
+        Outcome::Run { args, .. } => assert_eq!(args, ["login", "--proxy=stale.example:443"]),
+        other => panic!("expected an interactive login, got {other:?}"),
+    }
+    // No silent attempt first: the expiry is already known.
+    assert!(auth.switches.lock().unwrap().is_empty());
+    assert!(app.last_was_auth);
+    assert_eq!(app.profile_gen, 1);
+    assert!(app.topology.is_none(), "old profile's topology dropped");
+    // After the handoff the event loop refreshes like after any login.
+    app.after_action();
+    assert!(app.topology.is_some());
+    assert_eq!(app.lists.nodes.len(), 3);
+}
+
+#[test]
+fn a_silent_switch_that_needs_a_login_falls_back_to_the_interactive_one() {
+    let (mut app, auth) = profiles_app();
+    // Looks valid, but tsh wanted to prompt (e.g. the session was revoked).
+    assert_eq!(
+        pick_profile(&mut app, "late.example:443"),
+        Outcome::Continue
+    );
+    assert_eq!(*auth.switches.lock().unwrap(), ["late.example:443"]);
+    match app.take_deferred() {
+        Some(Outcome::Run { args, .. }) => assert_eq!(args, ["login", "--proxy=late.example:443"]),
+        other => panic!("expected a deferred interactive login, got {other:?}"),
+    }
+    assert!(app.take_deferred().is_none(), "handed out once");
+    assert!(app.last_was_auth);
+}
+
+#[test]
+fn a_failed_switch_keeps_the_current_profile() {
+    let (mut app, _) = profiles_app();
+    let nodes = app.lists.nodes.len();
+    assert_eq!(
+        pick_profile(&mut app, "down.example:443"),
+        Outcome::Continue
+    );
+    assert_eq!(app.profile_gen, 0);
+    assert_eq!(app.profile_switching, None);
+    assert!(!app.loading, "spinner stopped, so r works again");
+    assert_eq!(app.profile.as_ref().unwrap().username, "maxime");
+    assert!(app.topology.is_some());
+    assert_eq!(app.lists.nodes.len(), nodes);
+    assert!(app.take_deferred().is_none());
+    let status = app.status.as_deref().unwrap_or("");
+    assert!(
+        status.contains("could not switch to profile down.example:443"),
+        "{status}"
+    );
+}
+
+#[test]
+fn a_profile_switch_drops_caches_and_stale_results() {
+    let (mut app, _) = profiles_app();
+    // State of the old profile: caches, an aggregate slice, in-flight seqs.
+    app.agg
+        .cache
+        .insert((Tab::Ssh, cn("leaf.example")), Vec::new());
+    assert!(!app.cache_key.is_empty());
+    let old_gen = app.profile_gen;
+    let old_tab_req = app.tab_req;
+    let old_agg_seq = app.agg.seq;
+    let old_prefetch = app.prefetch_seq;
+
+    pick_profile(&mut app, "other.example:443");
+    assert!(app.tab_req > old_tab_req);
+    assert!(app.prefetch_seq > old_prefetch);
+    assert!(app.agg.seq > old_agg_seq);
+    assert!(
+        !app.agg.cache.contains_key(&(Tab::Ssh, cn("leaf.example"))),
+        "aggregate cache of the old profile dropped"
+    );
+
+    // Late results of the old profile are discarded.
+    let old_status = domain::profile::SessionStatus {
+        active: FakeAuth.status().unwrap(),
+        profiles: Vec::new(),
+    };
+    app.apply(old_gen, JobResult::Status(Ok(old_status)));
+    assert_eq!(app.profile.as_ref().unwrap().username, "bob");
+    app.apply(
+        old_tab_req,
+        JobResult::List {
+            tab: Tab::Ssh,
+            result: Ok(super::dispatch::Listing::Nodes(Vec::new())),
+        },
+    );
+    assert_eq!(app.lists.nodes.len(), 3);
+    app.apply(
+        old_agg_seq,
+        JobResult::Aggregate {
+            tab: Tab::Kube,
+            cluster: cn("leaf.example"),
+            rows: Ok(Vec::new()),
+        },
+    );
+    assert!(!app.agg.cache.contains_key(&(Tab::Kube, cn("leaf.example"))));
+    app.apply(old_gen, JobResult::AdminAllowed(false));
+    assert!(app.admin_allowed, "old admin verdict ignored");
+}
+
+#[test]
+fn a_switch_stops_profile_keyed_work_of_the_old_profile() {
+    let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut app = test_app_with(Box::new(FakeAdmin), Box::new(recording_auth(&calls)));
+    calls.lock().unwrap().clear();
+    // A newer profile generation is published (the switch went through)...
+    app.dispatcher.note_profile_generation(app.profile_gen + 1);
+    // ...so an admin fan-out queued for the old one must not re-key anything.
+    app.agg.enabled = true;
+    app.switch_tab(Tab::Users);
+    assert!(
+        calls.lock().unwrap().is_empty(),
+        "{:?}",
+        calls.lock().unwrap()
+    );
+}
+
+#[test]
+fn profile_validity_reads_as_expired_time_or_date() {
+    let p = |until: &str, at: i64| domain::profile::ProfileSummary {
+        proxy: domain::value::ProxyAddr::try_from("p.example:443").unwrap(),
+        cluster: "p.example".to_owned(),
+        username: "alice".to_owned(),
+        valid_until: until.to_owned(),
+        expires_at: Some(at),
+        active: false,
+    };
+    let now = 1_000_000;
+    assert_eq!(
+        profile_validity(&p("2026-10-08T22:05:58+02:00", now + 3600), now),
+        "valid until 22:05"
+    );
+    assert_eq!(
+        profile_validity(&p("2026-10-12T22:05:58+02:00", now + 400_000), now),
+        "valid until 2026-10-12 22:05"
+    );
+    assert_eq!(profile_validity(&p("x", now), now), "expired");
 }

@@ -230,7 +230,7 @@ pub(super) fn render_footer(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         match &app.mode {
             Mode::Search => "type to filter  ↑/↓ select  Enter connect  Esc cancel",
-            Mode::Picker => "↑/↓ choose cluster  Enter select  Esc/c close",
+            Mode::Picker => "↑/↓ choose cluster or profile  Enter select  Esc/c close",
             Mode::Login(_) => "type login  Enter connect  Esc cancel",
             Mode::CreateRequest => "type roles (comma-separated)  Enter create  Esc cancel",
             Mode::ConfirmLogout => "log out of Teleport?  y/Enter confirm  Esc cancel",

@@ -10,12 +10,14 @@ use domain::admin::{
     AdminRole, AdminUser, Bot, GeneratedToken, Instance, InviteLink, ProvisionToken,
 };
 use domain::capability::Capabilities;
+use domain::cluster::ClusterContext;
 use domain::node::SshNode;
 use domain::port::{
     AdminRepository, AppRepository, AuthGateway, ClusterRepository, DatabaseRepository,
     KubeRepository, NodeRepository, RecordingRepository, RequestRepository, SessionRepository,
 };
 use domain::preferences::Preferences;
+use domain::profile::ProfileSummary;
 use domain::recording::SessionRecording;
 use domain::request::AccessRequest;
 use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
@@ -212,6 +214,31 @@ pub(crate) enum Mode {
     /// Editing the `tsh login` form (proxy / user / auth / mfa).
     LoginForm,
     Help,
+}
+
+/// One selectable row of the `c` picker: the all-clusters aggregate, a cluster
+/// of the active profile, or another `tsh` profile (another proxy) to switch to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PickerEntry<'a> {
+    AllClusters,
+    Cluster(&'a ClusterContext),
+    Profile(&'a ProfileSummary),
+}
+
+/// A profile's certificate validity for the picker, relative to `now` (Unix
+/// seconds): `expired`, `valid until 22:05` within a day, else with the date.
+/// `valid_until` is RFC3339 in the local zone tsh printed it in.
+pub(crate) fn profile_validity(p: &ProfileSummary, now: i64) -> String {
+    if p.is_expired_at(now) {
+        return "expired".to_owned();
+    }
+    let date = p.valid_until.get(..10);
+    let time = p.valid_until.get(11..16);
+    match (p.expires_at, date, time) {
+        (Some(t), _, Some(time)) if t - now < 86_400 => format!("valid until {time}"),
+        (_, Some(date), Some(time)) => format!("valid until {date} {time}"),
+        _ => "validity unknown".to_owned(),
+    }
 }
 
 /// A connection awaiting a user/login choice. Built from validated parts; the

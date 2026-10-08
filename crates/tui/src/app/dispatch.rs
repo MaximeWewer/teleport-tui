@@ -14,9 +14,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 use application::use_case::{
-    AddUser, GenerateToken, GetStatus, ListApps, ListBots, ListClusters, ListDatabases,
-    ListInstances, ListKube, ListMfaDevices, ListNodes, ListRecordings, ListRequests, ListRoles,
+    AddUser, GenerateToken, ListApps, ListBots, ListClusters, ListDatabases, ListInstances,
+    ListKube, ListMfaDevices, ListNodes, ListProfiles, ListRecordings, ListRequests, ListRoles,
     ListSessions, ListTokens, ListUsers, ProbeAdminRights, RemoveToken, ResetUser, SelectCluster,
+    SwitchProfile,
 };
 use domain::admin::{
     AdminRole, AdminUser, Bot, GeneratedToken, Instance, InviteLink, ProvisionToken,
@@ -25,13 +26,13 @@ use domain::cluster::{ClusterContext, ClusterTopology};
 use domain::error::{DomainError, ReportableError};
 use domain::mfa::MfaDevice;
 use domain::node::SshNode;
-use domain::profile::Profile;
+use domain::profile::SessionStatus;
 use domain::recording::SessionRecording;
 use domain::request::AccessRequest;
 use domain::resource::{App as AppResource, Database, KubeCluster, Resource};
 use domain::secret::SecretString;
 use domain::session::ActiveSession;
-use domain::value::{ClusterName, ResourceName, RoleList, TokenTypes};
+use domain::value::{ClusterName, ProxyAddr, ResourceName, RoleList, TokenTypes};
 
 use super::{AggRow, ProxyEvent, Repositories, Tab};
 
@@ -73,7 +74,8 @@ pub(super) enum Job {
 /// The result of a [`Job`], sent back to the UI thread.
 pub(super) enum JobResult {
     Clusters(Result<ClusterTopology, DomainError>),
-    Status(Result<Option<Profile>, DomainError>),
+    /// The active profile plus every other known `tsh` profile.
+    Status(Result<SessionStatus, DomainError>),
     List {
         tab: Tab,
         result: Result<Listing, DomainError>,
@@ -108,6 +110,12 @@ pub(super) enum JobResult {
     RestoreFailed {
         root: ClusterName,
         error: DomainError,
+    },
+    /// The non-interactive switch to another proxy's profile finished. Its seq
+    /// is the profile generation the switch opens on success.
+    ProfileSwitched {
+        proxy: ProxyAddr,
+        result: Result<(), DomainError>,
     },
 }
 
@@ -216,7 +224,7 @@ fn list_tab(
 fn run_job(repos: &Repositories, job: Job) -> JobResult {
     match job {
         Job::Clusters => JobResult::Clusters(ListClusters::new(repos.clusters.as_ref()).execute()),
-        Job::Status => JobResult::Status(GetStatus::new(repos.auth.as_ref()).execute()),
+        Job::Status => JobResult::Status(ListProfiles::new(repos.auth.as_ref()).execute()),
         Job::List { tab, ctx } => JobResult::List {
             tab,
             result: list_tab(repos, tab, ctx.as_ref()),
@@ -478,6 +486,18 @@ pub(super) struct Generations {
     pub(super) tab: AtomicU64,
     /// The current prefetch batch (`App::prefetch_seq`).
     pub(super) prefetch: AtomicU64,
+    /// The current `tsh` profile (`App::profile_gen`), bumped by a switch to
+    /// another proxy. A profile-keyed job (admin fan-out, scoped admin listing,
+    /// root restore) queued for an older one would re-select the *old* profile's
+    /// clusters under the new proxy, so it is skipped instead.
+    pub(super) profile: AtomicU64,
+}
+
+impl Generations {
+    /// Whether `gen` is still the current profile generation.
+    fn profile_is(&self, generation: u64) -> bool {
+        self.profile.load(Ordering::Acquire) == generation
+    }
 }
 
 impl Generations {
@@ -624,10 +644,14 @@ impl Dispatcher {
     pub(super) fn spawn_admin_scoped(
         &self,
         seq: u64,
+        generation: u64,
         job: Job,
         cluster: ClusterName,
         root: ClusterName,
     ) -> Vec<(u64, JobResult)> {
+        if !self.generations.profile_is(generation) {
+            return Vec::new();
+        }
         if self.synchronous {
             return run_scoped_if_latest(
                 &self.repos,
@@ -653,7 +677,11 @@ impl Dispatcher {
                 let _guard = profile_lock
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                run_scoped_if_latest(&repos, &generations.tab, seq, job, &cluster, &root)
+                if generations.profile_is(generation) {
+                    run_scoped_if_latest(&repos, &generations.tab, seq, job, &cluster, &root)
+                } else {
+                    Vec::new() // the profile was switched while this job waited
+                }
             };
             for result in results {
                 let _ = tx.send((seq, result));
@@ -671,6 +699,7 @@ impl Dispatcher {
     pub(super) fn spawn_admin_stream(
         &self,
         seq: u64,
+        generation: u64,
         tab: Tab,
         clusters: Vec<ClusterContext>,
         root: ClusterName,
@@ -678,6 +707,9 @@ impl Dispatcher {
         if self.synchronous {
             let mut out = Vec::new();
             for ctx in &clusters {
+                if !self.generations.profile_is(generation) {
+                    break;
+                }
                 let rows = admin_cluster_rows(&self.repos, tab, ctx);
                 let restore = restore_root(&self.repos, &root);
                 out.push((
@@ -695,6 +727,7 @@ impl Dispatcher {
         let repos = Arc::clone(&self.repos);
         let tx = self.job_tx.clone();
         let profile_lock = Arc::clone(&self.profile_lock);
+        let generations = Arc::clone(&self.generations);
         std::thread::spawn(move || {
             for ctx in &clusters {
                 let cluster = ctx.name.clone();
@@ -706,6 +739,11 @@ impl Dispatcher {
                     let _guard = profile_lock
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    // Another proxy's profile is active now: these clusters (and
+                    // this root) belong to the old one, so stop here.
+                    if !generations.profile_is(generation) {
+                        break;
+                    }
                     let rows = admin_cluster_rows(&repos, tab, ctx);
                     // Restore root while still holding the lock - the active profile
                     // is then only ever on a leaf inside this critical section. So
@@ -733,43 +771,100 @@ impl Dispatcher {
     /// re-key never freezes the UI. Synchronous mode applies the results inline.
     ///
     /// [`profile_lock`]: Dispatcher::profile_lock
+    ///
+    /// Results are tagged with `generation` (the profile they were read for);
+    /// the root restore is skipped when the profile changed meanwhile.
     pub(super) fn spawn_after_action(
         &self,
+        generation: u64,
         restore_root: Option<ClusterName>,
         reload_topology: bool,
     ) -> Vec<(u64, JobResult)> {
         if self.synchronous {
             let failed = restore_root
                 .as_ref()
+                .filter(|_| self.generations.profile_is(generation))
                 .and_then(|root| self::restore_root(&self.repos, root));
-            let mut out = vec![(0, run_job(&self.repos, Job::Status))];
+            let mut out = vec![(generation, run_job(&self.repos, Job::Status))];
             if reload_topology {
-                out.push((0, run_job(&self.repos, Job::Clusters)));
-                out.push((0, run_job(&self.repos, Job::AdminProbe)));
+                out.push((generation, run_job(&self.repos, Job::Clusters)));
+                out.push((generation, run_job(&self.repos, Job::AdminProbe)));
             }
             // Reported last so the refresh's own status doesn't hide it.
-            out.extend(failed.map(|r| (0, r)));
+            out.extend(failed.map(|r| (generation, r)));
             return out;
         }
         let repos = Arc::clone(&self.repos);
         let tx = self.job_tx.clone();
         let profile_lock = Arc::clone(&self.profile_lock);
+        let generations = Arc::clone(&self.generations);
         std::thread::spawn(move || {
             let failed = restore_root.and_then(|root| {
                 let _guard = profile_lock
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                self::restore_root(&repos, &root)
+                if generations.profile_is(generation) {
+                    self::restore_root(&repos, &root)
+                } else {
+                    None
+                }
             });
-            let _ = tx.send((0, run_job(&repos, Job::Status)));
+            let _ = tx.send((generation, run_job(&repos, Job::Status)));
             if reload_topology {
-                let _ = tx.send((0, run_job(&repos, Job::Clusters)));
-                let _ = tx.send((0, run_job(&repos, Job::AdminProbe)));
+                let _ = tx.send((generation, run_job(&repos, Job::Clusters)));
+                let _ = tx.send((generation, run_job(&repos, Job::AdminProbe)));
             }
             // Reported last so the refresh's own status doesn't hide it.
             if let Some(failed) = failed {
-                let _ = tx.send((0, failed));
+                let _ = tx.send((generation, failed));
             }
+        });
+        Vec::new()
+    }
+
+    /// Publish `generation` as the current profile: queued profile-keyed jobs
+    /// of an older one then skip their work (see [`Generations::profile`]).
+    pub(super) fn note_profile_generation(&self, generation: u64) {
+        self.generations
+            .profile
+            .store(generation, Ordering::Release);
+    }
+
+    /// Switch to another proxy's profile (`tsh login --proxy`) off the UI
+    /// thread, under [`profile_lock`] so it never lands in the middle of an
+    /// admin fan-out's switch, read and restore. On success the profile
+    /// generation becomes `generation` *before* the lock is released, so a
+    /// fan-out step that was waiting for the lock sees the change and stops.
+    /// The result is tagged with `generation`.
+    ///
+    /// [`profile_lock`]: Dispatcher::profile_lock
+    pub(super) fn spawn_profile_switch(
+        &self,
+        generation: u64,
+        proxy: ProxyAddr,
+    ) -> Vec<(u64, JobResult)> {
+        let switch = move |repos: &Repositories, generations: &Generations, proxy: ProxyAddr| {
+            let result = SwitchProfile::new(repos.auth.as_ref()).execute(&proxy);
+            if result.is_ok() {
+                generations.profile.store(generation, Ordering::Release);
+            }
+            (generation, JobResult::ProfileSwitched { proxy, result })
+        };
+        if self.synchronous {
+            return vec![switch(&self.repos, &self.generations, proxy)];
+        }
+        let repos = Arc::clone(&self.repos);
+        let tx = self.job_tx.clone();
+        let profile_lock = Arc::clone(&self.profile_lock);
+        let generations = Arc::clone(&self.generations);
+        std::thread::spawn(move || {
+            let done = {
+                let _guard = profile_lock
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                switch(&repos, &generations, proxy)
+            };
+            let _ = tx.send(done);
         });
         Vec::new()
     }

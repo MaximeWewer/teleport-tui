@@ -11,9 +11,9 @@ use domain::error::ReportableError;
 use domain::mfa::MfaDevice;
 use domain::port::{ErrorLog, LogLevel, PreferencesStore};
 use domain::preferences::Preferences;
-use domain::profile::Profile;
+use domain::profile::{Profile, ProfileSummary};
 use domain::session::ActiveSession;
-use domain::value::ClusterName;
+use domain::value::{ClusterName, ProxyAddr};
 use ratatui::widgets::{ListState, TableState};
 
 use crate::forms::{
@@ -49,6 +49,22 @@ pub(crate) struct App {
     pub(crate) tsh: PathBuf,
 
     pub(crate) profile: Option<Profile>,
+    /// Every `tsh` profile (one per proxy logged in to), the active one
+    /// included, from the same `tsh status` read as [`Self::profile`].
+    pub(crate) profiles: Vec<ProfileSummary>,
+    /// Generation of the active `tsh` profile, bumped on every switch to
+    /// another proxy. Profile-dependent results (status, topology, admin probe,
+    /// MFA, sessions) carry the generation they were read for and are dropped
+    /// when it is not this one, so the old profile can't leak into the new.
+    profile_gen: u64,
+    /// Lowest aggregate fan-out seq still current: slices of a fan-out started
+    /// before the last profile switch are dropped (not even cached).
+    agg_floor: u64,
+    /// The proxy a background profile switch is running for (one at a time).
+    pub(crate) profile_switching: Option<ProxyAddr>,
+    /// An outcome produced by a background result rather than a key press (an
+    /// expired profile's interactive login), for the event loop to run next.
+    deferred: Option<Outcome>,
     pub(crate) last_was_auth: bool,
     pub(crate) topology: Option<ClusterTopology>,
     pub(crate) tab: Tab,
@@ -172,6 +188,11 @@ impl App {
             run_id,
             tsh,
             profile: None,
+            profiles: Vec::new(),
+            profile_gen: 0,
+            agg_floor: 0,
+            profile_switching: None,
+            deferred: None,
             last_was_auth: false,
             topology: None,
             tab: Tab::Ssh,
@@ -215,6 +236,12 @@ impl App {
         self.dispatch_aux(Job::Status);
         self.dispatch_aux(Job::Clusters);
         self.dispatch_aux(Job::AdminProbe);
+    }
+
+    /// An outcome a background result asked for (see [`Self::deferred`]),
+    /// handed to the event loop once.
+    pub(crate) const fn take_deferred(&mut self) -> Option<Outcome> {
+        self.deferred.take()
     }
 
     /// Drain finished jobs and advance the spinner. Called once per UI tick by
@@ -352,6 +379,13 @@ enum TextEvent {
     Edited,
     Submit,
     Cancel,
+}
+
+/// Seconds since the Unix epoch, now (0 if the clock is before it).
+pub(crate) fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 /// Clamped index step: stops at the first/last item (no wrap-around). An empty

@@ -214,6 +214,14 @@ fn event_loop(terminal: &mut Tui, app: &mut App, refresh: Option<Duration>) -> i
         if app.tick() {
             dirty = true;
         }
+        // A background result that needs the terminal (an expired profile's
+        // interactive login after a failed silent switch).
+        if let Some(outcome) = app.take_deferred() {
+            dirty = true;
+            if handle_outcome(terminal, app, outcome) {
+                return Ok(());
+            }
+        }
         // Handle any background proxy launches that have completed.
         for ev in app.drain_proxy_events() {
             handle_proxy_event(terminal, app, ev);
@@ -283,10 +291,17 @@ fn run_and_report(terminal: &mut Tui, app: &mut App, args: &[String], label: &st
 }
 
 /// Dispatch the [`Outcome`] of a key press. Returns `true` when the app should
-/// quit; every other outcome is handled here (interactive handoff, background
-/// proxy launches, kube exec, recording replay) and returns `false`.
+/// quit (see [`handle_outcome`]).
 fn handle_key(terminal: &mut Tui, app: &mut App, key: KeyEvent) -> bool {
-    match app.on_key(key) {
+    let outcome = app.on_key(key);
+    handle_outcome(terminal, app, outcome)
+}
+
+/// Act on an [`Outcome`]. Returns `true` when the app should quit; every other
+/// outcome is handled here (interactive handoff, background proxy launches,
+/// kube exec, recording replay) and returns `false`.
+fn handle_outcome(terminal: &mut Tui, app: &mut App, outcome: Outcome) -> bool {
+    match outcome {
         Outcome::Quit => return true,
         Outcome::Continue => {}
         Outcome::Run { args, label } => run_and_report(terminal, app, &args, &label, false),

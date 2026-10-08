@@ -7,18 +7,20 @@ use domain::admin::{GeneratedToken, InviteLink};
 use domain::cluster::{ClusterContext, ClusterTopology};
 use domain::error::{DomainError, ReportableError};
 use domain::mfa::MfaDevice;
-use domain::profile::Profile;
+use domain::profile::SessionStatus;
 use domain::resource::Resource;
 use domain::session::ActiveSession;
-use domain::value::ClusterName;
+use domain::value::{ClusterName, ProxyAddr};
 
 use super::dispatch::{Job, JobResult, Lane, Listing, agg_rows_of, err_row};
-use super::{AggRow, App, Mode, PREFETCH_BASE, Tab};
+use super::{AggRow, App, Mode, Outcome, PREFETCH_BASE, Tab};
 
 impl App {
-    /// Dispatch an auxiliary (ungated) job: status / clusters.
+    /// Dispatch an auxiliary job (status, clusters, actions), tagged with the
+    /// current profile generation so a profile-dependent read that lands after
+    /// a profile switch is dropped (see [`App::apply`]).
     pub(super) fn dispatch_aux(&mut self, job: Job) {
-        self.send(0, job, Lane::Other);
+        self.send(self.profile_gen, job, Lane::Other);
     }
 
     /// Dispatch the active-tab data job, marking the tab as loading and tagging
@@ -50,6 +52,20 @@ impl App {
     }
 
     pub(super) fn apply(&mut self, seq: u64, result: JobResult) {
+        // Reads of the active profile are only good for the profile they were
+        // read from: drop one issued before the last profile switch.
+        let profile_read = matches!(
+            result,
+            JobResult::Clusters(_)
+                | JobResult::Status(_)
+                | JobResult::AdminAllowed(_)
+                | JobResult::AdminProbeFailed(_)
+                | JobResult::Mfa(_)
+                | JobResult::Sessions(_)
+        );
+        if profile_read && seq != self.profile_gen {
+            return;
+        }
         match result {
             JobResult::Clusters(r) => self.ok_or_report(r, Self::apply_topology),
             JobResult::Status(r) => self.ok_or_report(r, Self::apply_status),
@@ -74,6 +90,9 @@ impl App {
                 self.apply_agg_cluster(seq, tab, &cluster, rows, true);
             }
             JobResult::RestoreFailed { root, error } => self.report_restore_failed(&root, &error),
+            JobResult::ProfileSwitched { proxy, result } => {
+                self.apply_profile_switched(seq, &proxy, result);
+            }
             JobResult::List { tab, result } => self.apply_tab(seq, tab, result),
         }
     }
@@ -127,13 +146,80 @@ impl App {
         self.prefetch_all();
     }
 
-    fn apply_status(&mut self, profile: Option<Profile>) {
+    fn apply_status(&mut self, status: SessionStatus) {
         // No active session (logout / expiry): wipe every listing so no
         // stale resource stays on screen.
-        if profile.is_none() {
+        if status.active.is_none() {
             self.clear_session();
         }
-        self.profile = profile;
+        self.profile = status.active;
+        self.profiles = status.profiles;
+    }
+
+    /// The background switch to `proxy`'s profile finished. On success that
+    /// profile is active under generation `generation`: reset and reload
+    /// everything. A profile that needs a fresh login falls back to the
+    /// interactive `tsh login --proxy`; any other failure keeps the current one.
+    fn apply_profile_switched(
+        &mut self,
+        generation: u64,
+        proxy: &ProxyAddr,
+        result: Result<(), DomainError>,
+    ) {
+        self.profile_switching = None;
+        self.loading = false;
+        match result {
+            Ok(()) => {
+                self.enter_profile(generation);
+                self.bootstrap();
+                self.status = Some(format!("switched to profile {proxy}, reloading…"));
+            }
+            Err(DomainError::NotAuthenticated | DomainError::CertExpired) => {
+                self.deferred = Some(self.interactive_profile_login(proxy));
+            }
+            Err(e) => {
+                self.report(&e);
+                self.status = Some(format!(
+                    "[{}] could not switch to profile {proxy}: {} (still on the current one)",
+                    e.code(),
+                    e.message()
+                ));
+            }
+        }
+    }
+
+    /// Hand the terminal to `tsh login --proxy=<proxy>` (password / MFA / SSO
+    /// as that profile needs), then reload as for any login (`after_action`).
+    /// The profile generation moves on *before* the handoff, so background work
+    /// still keyed to the old profile stops instead of racing the login.
+    pub(super) fn interactive_profile_login(&mut self, proxy: &ProxyAddr) -> Outcome {
+        self.enter_profile(self.profile_gen + 1);
+        self.last_was_auth = true;
+        Outcome::Run {
+            args: application::command::login_proxy(proxy),
+            label: format!("Logging in to profile {proxy}… (tsh will prompt if needed)"),
+        }
+    }
+
+    /// Make `generation` the current profile generation and drop everything
+    /// read for the previous profile: listings and their caches (scoped,
+    /// prefetched, aggregate), the topology, the admin verdict, and any
+    /// in-flight request (tab, prefetch batch, aggregate fan-out), whose late
+    /// results are then discarded. Background proxies and forwards are left
+    /// running: each holds its own certificate for the old profile.
+    pub(super) fn enter_profile(&mut self, generation: u64) {
+        self.profile_gen = generation;
+        self.dispatcher.note_profile_generation(generation);
+        self.clear_session();
+        self.agg_floor = self.agg.seq;
+        self.admin_probed = false;
+        self.pending_root_restore = None;
+        self.relogin_root = None;
+        self.prefetch_cluster = None;
+        self.prefetch_seq += 1;
+        self.dispatcher.note_prefetch_batch(self.prefetch_seq);
+        self.tab_req += 1;
+        self.dispatcher.note_tab_request(self.tab_req);
     }
 
     fn show_token(&mut self, token: GeneratedToken) {
@@ -222,6 +308,9 @@ impl App {
         rows: Vec<AggRow>,
         cache: bool,
     ) {
+        if seq < self.agg_floor {
+            return; // a fan-out of the profile we switched away from
+        }
         if cache {
             self.agg.cache.insert((tab, cluster.clone()), rows.clone());
         }
@@ -367,9 +456,9 @@ impl App {
         if reload_topology {
             self.status = Some("refreshing session…".to_owned());
         }
-        for (seq, result) in self
-            .dispatcher
-            .spawn_after_action(restore_root, reload_topology)
+        for (seq, result) in
+            self.dispatcher
+                .spawn_after_action(self.profile_gen, restore_root, reload_topology)
         {
             self.apply(seq, result);
         }
@@ -425,7 +514,11 @@ impl App {
             return;
         };
         let seq = self.begin_tab_request();
-        for (seq, result) in self.dispatcher.spawn_admin_scoped(seq, job, cluster, root) {
+        let generation = self.profile_gen;
+        for (seq, result) in self
+            .dispatcher
+            .spawn_admin_scoped(seq, generation, job, cluster, root)
+        {
             self.apply(seq, result);
         }
     }
@@ -542,7 +635,11 @@ impl App {
         let seq = self.agg.seq;
         let tab = self.tab;
         // Streamed serially: each cluster's rows render (and cache) as they arrive.
-        for (seq, result) in self.dispatcher.spawn_admin_stream(seq, tab, missing, root) {
+        let generation = self.profile_gen;
+        for (seq, result) in self
+            .dispatcher
+            .spawn_admin_stream(seq, generation, tab, missing, root)
+        {
             self.apply(seq, result);
         }
     }

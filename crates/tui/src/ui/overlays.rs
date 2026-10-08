@@ -11,7 +11,7 @@ use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph};
 
 use super::centered;
 use super::chrome::cluster_label;
-use crate::app::{App, Mode, Tab};
+use crate::app::{App, Mode, PickerEntry, Tab, profile_validity, unix_now};
 
 pub(super) fn render_tool_picker(frame: &mut Frame, app: &App) {
     let items: Vec<ListItem> = app
@@ -55,34 +55,77 @@ pub(super) fn render_user_picker(frame: &mut Frame, app: &App) {
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-pub(super) fn render_picker(frame: &mut Frame, app: &mut App) {
-    let Some(topo) = &app.topology else { return };
-    // Entry 0 is the all-clusters aggregate view.
-    let mut items: Vec<ListItem> = vec![ListItem::new(Line::from(Span::styled(
-        "★ All clusters (aggregate)",
-        Style::default()
-            .fg(Color::Magenta)
-            .add_modifier(Modifier::BOLD),
-    )))];
-    items.extend(topo.all().map(|c| {
-        let dot = match c.status {
-            ClusterStatus::Online => Span::styled("●", Style::default().fg(Color::Green)),
-            ClusterStatus::Offline => Span::styled("●", Style::default().fg(Color::Red)),
-        };
-        ListItem::new(Line::from(vec![dot, Span::raw(" "), cluster_label(c)]))
-    }));
+pub(super) fn render_picker(frame: &mut Frame, app: &App) {
+    let now = unix_now();
+    let entries = app.picker_entries();
+    let mut items: Vec<ListItem> = Vec::with_capacity(entries.len() + 1);
+    // The list position of each selectable entry: the section header shifts
+    // the profiles one row down, so the highlight is mapped through this.
+    let mut rows = Vec::with_capacity(entries.len());
+    let mut header_done = false;
+    for entry in &entries {
+        if let PickerEntry::Profile(_) = entry
+            && !header_done
+        {
+            header_done = true;
+            items.push(ListItem::new(Line::from(Span::styled(
+                "── Other Teleport profiles ──",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            ))));
+        }
+        rows.push(items.len());
+        items.push(ListItem::new(picker_line(entry, now)));
+    }
 
-    let area = centered(frame.area(), 50, 50);
+    let area = centered(frame.area(), 60, 50);
     frame.render_widget(Clear, area);
     let list = List::new(items)
-        .block(Block::bordered().title(" Switch cluster / All "))
+        .block(Block::bordered().title(" Switch cluster / profile "))
         .highlight_style(
             Style::default()
                 .bg(Color::Blue)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▶ ");
-    frame.render_stateful_widget(list, area, &mut app.picker);
+    let selected = app.picker.selected().and_then(|i| rows.get(i).copied());
+    let mut state = ListState::default().with_selected(selected);
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+/// One picker row: the aggregate entry, a cluster with its status dot, or
+/// another profile with its user and certificate validity.
+fn picker_line(entry: &PickerEntry<'_>, now: i64) -> Line<'static> {
+    match entry {
+        PickerEntry::AllClusters => Line::from(Span::styled(
+            "★ All clusters (aggregate)",
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        )),
+        PickerEntry::Cluster(c) => {
+            let dot = match c.status {
+                ClusterStatus::Online => Span::styled("●", Style::default().fg(Color::Green)),
+                ClusterStatus::Offline => Span::styled("●", Style::default().fg(Color::Red)),
+            };
+            Line::from(vec![dot, Span::raw(" "), cluster_label(c)])
+        }
+        PickerEntry::Profile(p) => {
+            let colour = if p.is_expired_at(now) {
+                Color::Red
+            } else {
+                Color::Green
+            };
+            Line::from(vec![
+                Span::styled("◆", Style::default().fg(colour)),
+                Span::raw(format!(" {}  ", p.proxy)),
+                Span::styled(p.username.clone(), Style::default().fg(Color::Cyan)),
+                Span::raw("  "),
+                Span::styled(profile_validity(p, now), Style::default().fg(colour)),
+            ])
+        }
+    }
 }
 
 pub(super) fn render_login(frame: &mut Frame, app: &App) {
@@ -430,7 +473,11 @@ const HELP_ACTIONS: &[(&str, &str, HelpGate)] = &[
         "Recordings: replay the selected session (tsh play; Esc/q stops it)",
         HelpGate::TabVisible(Tab::Recordings),
     ),
-    ("c", "switch root / leaf cluster", HelpGate::Always),
+    (
+        "c",
+        "switch root / leaf cluster, or another Teleport profile (proxy)",
+        HelpGate::Always,
+    ),
     ("r", "refresh current tab", HelpGate::Always),
     (
         "M",

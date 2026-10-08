@@ -4,9 +4,11 @@
 //! Split out of `app`; the model types are imported from `super`.
 
 use domain::node::SshNode;
+use domain::profile::ProfileSummary;
+use domain::value::ClusterName;
 
 use super::listings::Listings;
-use super::{App, Mode, Tab, clamp_step};
+use super::{App, Mode, Outcome, PickerEntry, Tab, clamp_step, unix_now};
 
 impl App {
     pub(super) fn clear_active(&mut self) {
@@ -169,48 +171,102 @@ impl App {
         self.table.select(Some(next));
     }
 
+    /// The `c` picker's rows, in display order: "All clusters" and the active
+    /// profile's clusters (root first) when the topology is known, then every
+    /// other `tsh` profile.
+    pub(crate) fn picker_entries(&self) -> Vec<PickerEntry<'_>> {
+        let mut entries = Vec::new();
+        if let Some(topo) = &self.topology {
+            entries.push(PickerEntry::AllClusters);
+            entries.extend(topo.all().map(PickerEntry::Cluster));
+        }
+        entries.extend(
+            self.profiles
+                .iter()
+                .filter(|p| !p.active)
+                .map(PickerEntry::Profile),
+        );
+        entries
+    }
+
     pub(super) fn move_picker(&mut self, forward: bool) {
-        // Entry 0 is "All clusters", entries 1.. are the real clusters.
-        let Some(count) = self.topology.as_ref().map(|t| t.all().count() + 1) else {
+        let count = self.picker_entries().len();
+        if count == 0 {
             return;
-        };
+        }
         let next = clamp_step(self.picker.selected().unwrap_or(0), count, forward);
         self.picker.select(Some(next));
     }
 
-    pub(super) fn confirm_picker(&mut self) {
+    pub(super) fn confirm_picker(&mut self) -> Outcome {
+        /// The chosen entry, owned, so `self` can be mutated to act on it.
+        enum Choice {
+            All,
+            Cluster(ClusterName),
+            Profile(ProfileSummary),
+        }
         let Some(sel) = self.picker.selected() else {
-            return;
+            return Outcome::Continue;
+        };
+        let choice = match self.picker_entries().get(sel) {
+            Some(PickerEntry::AllClusters) => Choice::All,
+            Some(PickerEntry::Cluster(c)) => Choice::Cluster(c.name.clone()),
+            Some(PickerEntry::Profile(p)) => Choice::Profile((*p).clone()),
+            None => return Outcome::Continue,
         };
         self.mode = Mode::Normal;
-        if sel == 0 {
-            // "All clusters" → aggregate view.
-            self.agg.enabled = true;
-            self.reload_active();
-            return;
+        match choice {
+            Choice::All => {
+                // "All clusters" -> aggregate view.
+                self.agg.enabled = true;
+                self.reload_active();
+            }
+            Choice::Cluster(name) => self.select_scoped_cluster(&name),
+            Choice::Profile(p) => return self.choose_profile(&p),
         }
-        // A real cluster (index offset by the "All" entry) → scoped view.
+        Outcome::Continue
+    }
+
+    /// Scope the view to one cluster of the active profile.
+    fn select_scoped_cluster(&mut self, name: &ClusterName) {
         // Invalidate any in-flight aggregate fan-out so a late leaf can't clobber
         // the loading flag/status of the scoped fetch we're about to start.
         self.agg.enabled = false;
         self.agg.seq += 1;
-        let name = self
-            .topology
-            .as_ref()
-            .and_then(|t| t.all().nth(sel - 1))
-            .map(|c| c.name.clone());
-        if let Some(name) = name
-            && let Some(topo) = self.topology.as_mut()
-        {
-            match topo.select(&name) {
-                Ok(()) => {
-                    self.reload_active();
-                    // Warm the other tabs for the newly selected cluster.
-                    self.prefetch_all();
-                }
-                Err(e) => self.report(&e),
+        let Some(topo) = self.topology.as_mut() else {
+            return;
+        };
+        match topo.select(name) {
+            Ok(()) => {
+                self.reload_active();
+                // Warm the other tabs for the newly selected cluster.
+                self.prefetch_all();
             }
+            Err(e) => self.report(&e),
         }
+    }
+
+    /// Switch to another `tsh` profile (another proxy). A still-valid one is
+    /// switched to in the background (`tsh login --proxy`, no prompt); an
+    /// expired one needs the terminal for a fresh interactive login.
+    fn choose_profile(&mut self, p: &ProfileSummary) -> Outcome {
+        if let Some(running) = &self.profile_switching {
+            self.status = Some(format!("already switching to profile {running}…"));
+            return Outcome::Continue;
+        }
+        if p.is_expired_at(unix_now()) {
+            return self.interactive_profile_login(&p.proxy);
+        }
+        self.profile_switching = Some(p.proxy.clone());
+        self.loading = true;
+        self.status = Some(format!("switching to profile {}…", p.proxy));
+        for (seq, result) in self
+            .dispatcher
+            .spawn_profile_switch(self.profile_gen + 1, p.proxy.clone())
+        {
+            self.apply(seq, result);
+        }
+        Outcome::Continue
     }
 
     pub(super) fn move_tool_picker(&mut self, forward: bool) {
